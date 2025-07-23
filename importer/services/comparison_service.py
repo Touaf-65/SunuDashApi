@@ -5,6 +5,16 @@ from utils.functions import (get_date_range, get_common_date_range, group_statis
 class ComparisonService:
     @staticmethod
     def get_common_date(df_stat, df_recap):
+        """
+        Computes the common date range between two DataFrames.
+
+        Args:
+            df_stat (pd.DataFrame): The 'statistic' DataFrame.
+            df_recap (pd.DataFrame): The 'recap' DataFrame.
+
+        Returns:
+            tuple or None: A tuple containing the common date range, or None if there is no common range.
+        """
         recap_range = get_date_range(df_recap, 'payment_date')
         stat_range = get_date_range(df_stat, 'payment_date')
 
@@ -14,6 +24,15 @@ class ComparisonService:
 
     @staticmethod
     def rename_recap_columns(df_recap):
+        """
+        Renames the columns of a DataFrame to distinguish them from the columns of the statistic DataFrame.
+
+        Args:
+            df_recap (pd.DataFrame): The 'recap' DataFrame.
+
+        Returns:
+            pd.DataFrame: The DataFrame with renamed columns.
+        """
         df_recap.rename(columns={
             "amount_claimed": "amount_claimed_recap",
             "amount_reimbursed": "amount_reimbursed_recap"
@@ -22,7 +41,28 @@ class ComparisonService:
         return df_recap
 
     @staticmethod
-    def compare_dataframes(df_stat, df_recap, common_range):
+    def compare_dataframes(df_stat, df_recap, common_range):      
+        """
+        Compares two DataFrames for conformity based on a common date range.
+
+        Filters and processes the 'statistic' and 'recap' DataFrames to identify
+        differences in claimed and reimbursed amounts. The function groups the
+        statistic data by claim, converts claim IDs to uppercase for consistency,
+        and merges the data on claim IDs. It calculates the differences in billed
+        and reimbursement amounts and assesses conformity for each claim.
+
+        Args:
+            df_stat (pd.DataFrame): The 'statistic' DataFrame containing claim details.
+            df_recap (pd.DataFrame): The 'recap' DataFrame containing additional claim details.
+            common_range (tuple): A tuple containing the common date range (start, end)
+                for filtering the data.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the compared results with columns
+            for billed amount difference, reimbursement amount difference, and
+            conformity status.
+        """
+
         filtered_df_stat = df_stat[(df_stat['payment_date'] >= common_range[0]) & (df_stat['payment_date'] <= common_range[1])]
         filtered_df_recap = df_recap[(df_recap['payment_date'] >= common_range[0]) & (df_recap['payment_date'] <= common_range[1])]
 
@@ -41,6 +81,18 @@ class ComparisonService:
 
     @staticmethod
     def extract_non_conformity(df_comparaison):
+        """
+        Extracts non-conforming data from a DataFrame of compared data.
+
+        The function filters non-conforming claims, checks for deleted conforming claims,
+        and adds an observation column to the non-conforming DataFrame.
+
+        Args:
+            df_comparaison (pd.DataFrame): The DataFrame containing the compared data.
+
+        Returns:
+            tuple: A tuple containing the non-conforming DataFrame and the conforming DataFrame.
+        """
         df_non_conformes = df_comparaison[df_comparaison['conformity'] == 'Non conforme'].copy()
         df_conformes = df_comparaison[df_comparaison['conformity'] == 'Conforme'].copy()
 
@@ -61,6 +113,20 @@ class ComparisonService:
 
     @staticmethod
     def export_results(df_stat, common_range, df_non_conformes, df_conformes):
+        """
+        Exports the results of the comparison.
+
+        Args:
+            df_stat (pd.DataFrame): The 'statistic' DataFrame containing claim details.
+            common_range (tuple): A tuple containing the common date range (start, end)
+                for filtering the data.
+            df_non_conformes (pd.DataFrame): The DataFrame containing non-conforming claims.
+            df_conformes (pd.DataFrame): The DataFrame containing conforming claims.
+
+        Returns:
+            dict: A dictionary containing the non-conforming DataFrame, the conforming DataFrame,
+            and the common date range.
+        """
         conform_claim_ids = df_conformes['claim_id'].unique()
         df_stat_filtered = df_stat[(df_stat['payment_date'] >= common_range[0]) & (df_stat['payment_date'] <= common_range[1])]
         df_final_conformes = df_stat_filtered[df_stat_filtered['claim_id'].isin(conform_claim_ids)].copy()

@@ -90,6 +90,9 @@ class ImportSession(models.Model):
     total_reimbursed_amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
 
 
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+
     def __str__(self):
         return f"ImportSession {self.pk} ({self.country.name}) - {self.status}"
     def save(self, *args, **kwargs):

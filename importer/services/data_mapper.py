@@ -12,6 +12,14 @@ from django.utils.timezone import make_aware, is_naive
 
 class DataMapper:
     def __init__(self, df_stat, import_session):
+        """
+        Initialize a DataMapper object.
+
+        Args:
+            df_stat (pandas.DataFrame): Dataframe containing the stat data
+            import_session (File): The import session object associated
+                with this data mapper.
+        """
         self.df_stat = df_stat
         self.import_session = import_session
         self.country = import_session.country
@@ -19,6 +27,28 @@ class DataMapper:
         self.user = import_session.user
 
     def map_data(self):
+        """
+        Map the data from the stat file to the database. This function takes care
+        of creating all the necessary objects such as acts, families, categories,
+        clients, policies, partners, payment methods, operators, insured, invoices
+        and claims.
+
+        The function works in 4 main steps:
+        1. Create all the necessary objects for the acts, families, categories,
+        clients, policies, partners, payment methods, operators
+        2. Create the primary insured
+        3. Create the dependant insured
+        4. Create the claims and link them to the insured, policy, act, invoice, partner, operator
+
+        The function also keeps track of the number of insured created, the number
+        of claims created, the total amount claimed and the total amount reimbursed.
+
+        The function also save the import session with the number of insured created,
+        the number of claims created, the total amount claimed and the total amount
+        reimbursed.
+
+        :return: None
+        """
         df = self.df_stat.copy()
         insured_dict = {}
         self.errors = []  
@@ -125,6 +155,13 @@ class DataMapper:
 
     @staticmethod
     def get_or_create_category(label):
+        """
+        Retrieves or creates an ActCategory object based on the given label.
+        
+        The label is stripped and uppercased before being used in the get_or_create call.
+        If the label is not a string, it is replaced with a single space.
+        """
+        
         if isinstance(label, str):
             label = label.strip()
         else:
@@ -134,6 +171,13 @@ class DataMapper:
 
     @staticmethod
     def get_or_create_family(label, category):
+        """
+        Retrieves or creates an ActFamily object based on the given label and category.
+        
+        The label is stripped and uppercased before being used in the get_or_create call.
+        If the label is not a string, it is replaced with a single space.
+        """
+        
         if isinstance(label, str):
             label = label.strip()
         else:
@@ -142,6 +186,19 @@ class DataMapper:
 
     @staticmethod
     def get_or_create_act(label, family, category):
+        """
+        Retrieves or creates an Act object based on the given label, family, and category.
+
+        The label is cleaned up by stripping and uppercasing it before being used to search or create the Act object.
+
+        Args:
+            label (str): The act's label.
+            family (ActFamily): The act's family.
+            category (ActCategory): The act's category.
+
+        Returns:
+            Act: The retrieved or created Act object.
+        """
         if isinstance(label, str):
             label = label.strip().upper()
         else:
@@ -149,7 +206,21 @@ class DataMapper:
         return Act.objects.get_or_create(label=label.strip().upper(), category=category, family=family)[0]
 
 
-    def get_or_create_partner(self, name, country_name, user):
+    def get_or_create_partner(self, name, country_name, user):                
+        """
+        Retrieves or creates a Partner object based on the given name, country name, and user.
+
+        Attempts to find a country matching the provided country name, or uses the user's country if no match is found.
+        If no country can be found, a ValueError is raised.
+
+        Args:
+            name (str): The partner's name.
+            country_name (str): The country name associated with the partner.
+            user (User): The user associated with the partner.
+
+        Returns:
+            Partner: The retrieved or created Partner object.
+        """
         if isinstance(country_name, str):
             country_name = country_name.strip()
         else:
@@ -168,7 +239,24 @@ class DataMapper:
         return Partner.objects.get_or_create(name=name.strip().upper(), user=user, country=country)[0]
     
     @staticmethod
-    def get_or_create_payment_method(number, date, provider):
+    def get_or_create_payment_method(number, date, provider):            
+        """
+        Retrieves or creates a PaymentMethod object based on the given payment number, date, and provider.
+
+        This method attempts to parse the provided date string or object into an aware datetime object.
+        Supported date formats include "%m/%d/%Y", "%Y-%m-%d", pandas Timestamp, and Excel serial date numbers.
+        If the date format is unrecognized, a ValueError is raised.
+
+        Args:
+            number (str): The payment number.
+            date (Union[str, datetime, pd.Timestamp, int, float]): The date of the payment, which can be a string,
+                datetime object, pandas Timestamp, or an Excel serial date number.
+            provider (Partner): The provider associated with this payment method.
+
+        Returns:
+            PaymentMethod: The retrieved or created PaymentMethod object.
+        """
+
         if isinstance(date, str):
             try:
                 date = make_aware(datetime.strptime(date, "%m/%d/%Y"))
@@ -196,14 +284,43 @@ class DataMapper:
 
 
     def get_or_create_client(self, name):
+        """
+        Retrieves or creates a Client object based on the given name.
+
+        Args:
+            name (str): The client name.
+
+        Returns:
+            Client: The retrieved or created Client object.
+        """
         return Client.objects.get_or_create(name=name.strip().upper(), country=self.country, file=self.file)[0]
 
     def get_or_create_policy(self, number, client):
         
+        """
+        Retrieves or creates a Policy object based on the given policy number and client.
+
+        Args:
+            number (str): The policy number.
+            client (Client): The client object associated with this policy.
+
+        Returns:
+            Policy: The retrieved or created Policy object.
+        """
+
         return Policy.objects.get_or_create(policy_number=number.strip().upper(), client=client, file=self.file)[0]
 
     
     def get_or_create_operator(self, name):
+        """
+        Retrieves or creates an Operator object based on the given name.
+
+        Args:
+            name (str): The name of the operator.
+
+        Returns:
+            Operator: The retrieved or created Operator object.
+        """
         if isinstance(name, str):
             name = name.strip()
         else:
@@ -213,6 +330,16 @@ class DataMapper:
 
     def get_or_create_primary_insured(self, name, statut):
         
+        """
+        Retrieves or creates a primary insured based on the given name and status.
+
+        Args:
+            name (str): The name of the primary insured.
+            statut (str): The status of the primary insured, used to determine if the insured is a primary or not.
+
+        Returns:
+            Insured or None: The Insured object for the primary insured if created or found, otherwise None if the status is not "A".
+        """
         if statut.upper() != "A":
             return None
 
@@ -229,6 +356,19 @@ class DataMapper:
         return insured
     
     def get_or_create_dependent_insured(self, name, statut, principal_name, insured_dict):
+
+        """
+        Retrieves or creates a dependent insured based on the given name and status.
+
+        Args:
+            name (str): The name of the dependent insured.
+            statut (str): The status of the dependent insured, used to determine if they are a spouse or child.
+            principal_name (str): The name of the primary insured to which the dependent is linked.
+            insured_dict (dict): A dictionary mapping primary insured names to their respective Insured objects.
+
+        Returns:
+            Insured or None: The Insured object for the dependent if created or found, otherwise None if conditions are not met.
+        """
 
         if statut.upper() == "A" or not principal_name:
             return None  
@@ -257,6 +397,19 @@ class DataMapper:
 
 
     def get_or_create_invoice(self, number, claimed, reimbursed, provider, insured):
+        """
+        Retrieves or creates an invoice object based on the given parameters.
+
+        Args:
+            number (str|float|None): The invoice number, or None if no invoice number is provided.
+            claimed (float): The claimed amount.
+            reimbursed (float): The reimbursed amount.
+            provider (Partner): The provider object associated with this invoice.
+            insured (Insured): The insured object associated with this invoice.
+
+        Returns:
+            Invoice: The retrieved or created Invoice object.
+        """
         cleaned_number = ""
         if number is None:
             cleaned_number = ""
@@ -283,6 +436,25 @@ class DataMapper:
 
 
     def get_or_create_claim(self, claim_id, status, date_claim, settlement_date, invoice, act, operator, insured, partner, policy):
+        """
+        Retrieves or creates a claim object based on the given parameters.
+
+        Args:
+            claim_id (str): The claim id.
+            status (str): The claim status.
+            date_claim (str|datetime|int|float): The claim date.
+            settlement_date (str|datetime|int|float): The settlement date.
+
+            invoice (Invoice): The invoice object associated with this claim.
+            act (Act): The act object associated with this claim.
+            operator (Operator): The operator object associated with this claim.
+            insured (Insured): The insured object associated with this claim.
+            partner (Partner): The partner object associated with this claim.
+            policy (Policy): The policy object associated with this claim.
+
+        Returns:
+            Claim: The retrieved or created Claim object.
+        """
         if isinstance(date_claim, str):
             try:
                 date_claim = make_aware(datetime.strptime(date_claim, "%m/%d/%Y"))
