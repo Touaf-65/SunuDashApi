@@ -22,6 +22,7 @@ class File(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
     size = models.CharField(max_length=20, editable=False)
     country = models.ForeignKey(Country, on_delete=models.CASCADE, null=True, blank=True)
+    # import_session = models.ForeignKey('ImportSession', on_delete=models.CASCADE, null=True, blank=True)
 
     def save(self, *args, **kwargs):
         if not self.file_name:
@@ -60,13 +61,13 @@ class ImportSession(models.Model):
     Represents a session that links a statistical and a recap file together,
     tracks the processing status, and stores the final result or error report.
     """
-    STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('processing', 'Processing'),
-        ('done', 'Done'),
-        ('error', 'Error'),
-        ('done_with_errors', 'Done with Errors'),
-    ]
+    class Status(models.TextChoices):
+        PENDING = 'PENDING', 'Pending'
+        PROCESSING = 'PROCESSING', 'Processing'
+        DONE = 'DONE', 'Done'
+        ERROR = 'ERROR', 'Error'
+        DONE_WITH_ERRORS = 'DONE_WITH_ERRORS', 'Done with Errors'
+
 
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     uploaded_by_name = models.CharField(max_length=255, blank=True)
@@ -76,7 +77,7 @@ class ImportSession(models.Model):
     stat_file = models.ForeignKey(File, on_delete=models.CASCADE, related_name='stat_sessions')
     recap_file = models.ForeignKey(File, on_delete=models.CASCADE, related_name='recap_sessions')
     
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -93,8 +94,16 @@ class ImportSession(models.Model):
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
 
-    def __str__(self):
-        return f"ImportSession {self.pk} ({self.country.name}) - {self.status}"
+    log_file_path = models.CharField(max_length=500, blank=True, null=True)
+    
+    def get_log_file_url(self):
+        """Retourne l'URL du fichier de log s'il existe"""
+        if self.log_file_path and os.path.exists(self.log_file_path):
+            # Convertit le chemin absolu en URL relative
+            relative_path = os.path.relpath(self.log_file_path, settings.MEDIA_ROOT)
+            return f"{settings.MEDIA_URL}{relative_path}"
+        return None
+
     def save(self, *args, **kwargs):
         if not self.country and self.user and hasattr(self.user, 'country'):
             self.country = self.user.country
@@ -104,4 +113,7 @@ class ImportSession(models.Model):
                 self.uploaded_by_name = full_name or self.user.email
             if not self.uploaded_by_email:
                 self.uploaded_by_email = self.user.email
+        super().save(*args, **kwargs)
         
+    def __str__(self):
+        return f"ImportSession {self.pk} ({self.country.name}) - {self.status}"

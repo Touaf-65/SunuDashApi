@@ -1,5 +1,5 @@
 import pandas as pd
-from utils.functions import (get_date_range, get_common_date_range, group_statistic_by_sinistre,
+from importer.utils.functions import (get_date_range, get_common_date_range, group_statistic_by_sinistre,
                             convert_to_upper, check_conformity, delete_conform_rows, generate_observation
  )
 class ComparisonService:
@@ -15,8 +15,14 @@ class ComparisonService:
         Returns:
             tuple or None: A tuple containing the common date range, or None if there is no common range.
         """
+
         recap_range = get_date_range(df_recap, 'payment_date')
+
+        # print(f"Range date de recap: {recap_range}")
+
         stat_range = get_date_range(df_stat, 'payment_date')
+
+        # print(f"Range date de stat: {stat_range}")
 
         common_range = get_common_date_range(stat_range, recap_range)
 
@@ -66,18 +72,53 @@ class ComparisonService:
         filtered_df_stat = df_stat[(df_stat['payment_date'] >= common_range[0]) & (df_stat['payment_date'] <= common_range[1])]
         filtered_df_recap = df_recap[(df_recap['payment_date'] >= common_range[0]) & (df_recap['payment_date'] <= common_range[1])]
 
+
         df_stat_grouped = group_statistic_by_sinistre(filtered_df_stat)
         df_stat_grouped = convert_to_upper(df_stat_grouped, "claim_id")
         filtered_df_recap = convert_to_upper(filtered_df_recap, "claim_id")
 
-        df_comparaison = pd.merge(df_stat_grouped, filtered_df_recap, on="claim_id", how="inner")
-        df_comparaison.drop_duplicates(inplace=True)
+        filtered_df_recap = filtered_df_recap.rename(columns={
+            'amount_claimed': 'amount_claimed_recap',
+            'amount_reimbursed': 'amount_reimbursed_recap'
+        })
 
-        df_comparaison["billed_amount_diff"] = df_comparaison["amount_claimed"] - df_comparaison["amount_claimed_recap"]
-        df_comparaison["reimbursement_amount_diff"] = df_comparaison["amount_reimbursed"] - df_comparaison["amount_reimbursed_recap"]
-        df_comparaison["conformity"] = df_comparaison.apply(check_conformity, axis=1)
+        required_columns = ["amount_claimed", "amount_reimbursed", "claim_id"]
+        missing_columns = [col for col in required_columns if col not in df_stat_grouped.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns in df_stat_grouped: {missing_columns}")
 
-        return df_comparaison
+
+        df_comparison = pd.merge(
+            df_stat_grouped, 
+            filtered_df_recap, 
+            on="claim_id", 
+            how="inner",
+            suffixes=('', '_recap')
+        )
+
+        df_comparison["billed_amount_diff"] = df_comparison["amount_claimed"] - df_comparison["amount_claimed_recap"]
+        df_comparison["reimbursement_amount_diff"] = df_comparison["amount_reimbursed"] - df_comparison["amount_reimbursed_recap"]
+
+        
+        required_after_merge = ["amount_claimed", "amount_claimed_recap", 
+                              "amount_reimbursed", "amount_reimbursed_recap"]
+        missing_after_merge = [col for col in required_after_merge if col not in df_comparison.columns]
+        
+        if missing_after_merge:
+            raise ValueError(f"Missing required columns after merge: {missing_after_merge}")
+
+
+        for col in ['amount_claimed', 'amount_claimed_recap', 'amount_reimbursed', 'amount_reimbursed_recap']:
+            non_numeric = pd.to_numeric(df_comparison[col], errors='coerce').isna()
+            if non_numeric.any():
+                print(f"\n=== WARNING: Non-numeric values found in {col} ===")
+                print(df_comparison[non_numeric][['claim_id', col]].head())
+                df_comparison[col] = pd.to_numeric(df_comparison[col], errors='coerce').fillna(0)
+
+
+        df_comparison["conformity"] = df_comparison.apply(check_conformity, axis=1)
+
+        return df_comparison
 
     @staticmethod
     def extract_non_conformity(df_comparaison):

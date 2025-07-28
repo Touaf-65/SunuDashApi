@@ -1,0 +1,4 @@
+-- database: ./db.sqlite3
+
+DELETE FROM core_actfamily;
+DELETE FROM core_actcategory;

@@ -1,14 +1,16 @@
 import pandas as pd
 
 from core.models import (
-    File, Client, Policy, Insured, InsuredEmployer, Invoice, Partner, 
+    Client, Policy, Insured, Invoice, Partner, 
     PaymentMethod, Operator, Claim, Act, ActFamily, ActCategory
 )
 from users.models import Country
 from datetime import datetime
 from django.utils.timezone import make_aware, is_naive
-
-
+from rest_framework.response import Response
+from rest_framework import status
+# from .logging_service import ImportLoggerService
+from importer.services.logging_service import ImportLoggerService
 
 class DataMapper:
     def __init__(self, df_stat, import_session):
@@ -23,133 +25,317 @@ class DataMapper:
         self.df_stat = df_stat
         self.import_session = import_session
         self.country = import_session.country
-        self.file = import_session.file_stat
+        self.file = import_session.stat_file 
         self.user = import_session.user
+        
+        # Initialisation du logger
+        self.logger_service = ImportLoggerService(import_session.id)
+        
+        # Lists pour tracking
+        self.logs = []
+        self.orphan_claims = []
+        self.errors = []
 
     def map_data(self):
         """
-        Map the data from the stat file to the database. This function takes care
-        of creating all the necessary objects such as acts, families, categories,
-        clients, policies, partners, payment methods, operators, insured, invoices
-        and claims.
-
-        The function works in 4 main steps:
-        1. Create all the necessary objects for the acts, families, categories,
-        clients, policies, partners, payment methods, operators
-        2. Create the primary insured
-        3. Create the dependant insured
-        4. Create the claims and link them to the insured, policy, act, invoice, partner, operator
-
-        The function also keeps track of the number of insured created, the number
-        of claims created, the total amount claimed and the total amount reimbursed.
-
-        The function also save the import session with the number of insured created,
-        the number of claims created, the total amount claimed and the total amount
-        reimbursed.
-
-        :return: None
+        Map the data from the stat file to the database avec logging détaillé.
         """
-        df = self.df_stat.copy()
-        insured_dict = {}
-        self.errors = []  
+        try:
+            self.logger_service.log_step_start("DÉBUT DU MAPPING DES DONNÉES")
+            self.logger_service.log_info("Initialisation du mapping", {
+                "session_id": self.import_session.id,
+                "nombre_lignes": len(self.df_stat),
+                "utilisateur": self.user.username if hasattr(self.user, 'username') else str(self.user),
+                "pays": self.country.name if hasattr(self.country, 'name') else str(self.country)
+            })
+            
+            df = self.df_stat.copy()
+            insured_dict = {}
+            
+            # Compteurs
+            insured_created = 0
+            claims_created = 0
+            total_claimed = 0
+            total_reimbursed = 0
 
+            # Nettoyage des données
+            self.logger_service.log_step_start("Nettoyage des données", 1)
+            original_rows = len(df)
+            original_cols = len(df.columns)
+            
+            df = df.dropna(how='all', axis=1)
+            df = df.dropna(how='all', axis=0)
+            
+            cleaned_rows = len(df)
+            cleaned_cols = len(df.columns)
+            
+            self.logger_service.log_step_end("Nettoyage des données", True, {
+                "lignes_supprimées": original_rows - cleaned_rows,
+                "colonnes_supprimées": original_cols - cleaned_cols,
+                "lignes_restantes": cleaned_rows
+            })
 
-        insured_created = 0
-        claims_created = 0
-        total_claimed = 0
-        total_reimbursed = 0
+            # ÉTAPE 1: Création des objets de base
+            self.logger_service.log_step_start("Création des objets de base (catégories, familles, actes, etc.)", 2)
+            step1_errors = 0
+            
+            for index, row in df.iterrows():
+                try:
+                    self.logger_service.log_info(f"Traitement ligne {index}", {
+                        "beneficiary_name": row.get("beneficiary_name", "N/A"),
+                        "act_category": row.get("act_category", "N/A"),
+                        "act_family": row.get("act_family", "N/A")
+                    })
 
-        df = df.dropna(how='all', axis=1)
-        df = df.dropna(how='all', axis=0)
+                    cat = self.get_or_create_category(row["act_category"])
+                    fam = self.get_or_create_family(row["act_family"], cat)
+                    act = self.get_or_create_act(row["act_name"], fam)
+                    partner = self.get_or_create_partner(row["partner_name"], row["partner_country"])
+                    payment_method = self.get_or_create_payment_method(row["payment_method"], row["payment_date"], partner)
+                    operator = self.get_or_create_operator(row["modified_by"])
+                    client = self.get_or_create_client(row["employer_name"])
+                    policy = self.get_or_create_policy(row["policy_number"], client)
 
-        for index, row in df.iterrows():
-            try:
-                cat = self.get_or_create_category(row["act_category"])
-                fam = self.get_or_create_family(row["act_family"], cat)
-                act = self.get_or_create_act(row["act_name"], fam, cat)
+                    self.logger_service.log_info(f"✅ Ligne {index} traitée avec succès", {
+                        "category": cat.label,
+                        "family": fam.label,
+                        "act": act.label,
+                        "partner": partner.name,
+                        "client": client.name,
+                        "policy": policy.policy_number
+                    })
 
-                partner = self.get_or_create_partner(row["partner_name"], row["partner_country"], self.user)
-                self.get_or_create_payment_method(row["payment_method"], row["payment_date"], partner)
+                except Exception as e:
+                    step1_errors += 1
+                    self.logger_service.log_error(
+                        f"Erreur lors du traitement des objets de base",
+                        details={
+                            "beneficiary_name": row.get("beneficiary_name", "N/A"),
+                            "act_category": row.get("act_category", "N/A"),
+                            "partner_name": row.get("partner_name", "N/A")
+                        },
+                        line_index=index,
+                        exception=e
+                    )
+                    self.errors.append(f"[ÉTAPE 1 - ligne {index}] {str(e)}")
 
-                self.get_or_create_operator(row["modified_by"])
-                client = self.get_or_create_client(row["employer_name"])
-                self.get_or_create_policy(row["policy_number"], client)
-            except Exception as e:
-                self.errors.append(f"[ETAPE 1 - index {index}] Erreur : {e}")
+            self.logger_service.log_step_end("Création des objets de base", step1_errors == 0, {
+                "erreurs": step1_errors,
+                "lignes_traitées": len(df)
+            })
 
+            # ÉTAPE 2: Création des assurés principaux
+            self.logger_service.log_step_start("Création des assurés principaux", 3)
+            df_primary = df[df["insured_status"].str.upper() == "A"]
+            step2_errors = 0
+            
+            for index, row in df_primary.iterrows():
+                try:
+                    name = row["beneficiary_name"]
+                    insured = self.get_or_create_primary_insured(name, row["insured_status"])
+                    
+                    if insured:
+                        insured_dict[name.strip()] = insured
+                        insured_created += 1
+                        self.logger_service.log_info(f"✅ Assuré principal créé: {insured.name}", {
+                            "ligne": index,
+                            "status": row["insured_status"]
+                        })
+                    else:
+                        self.logger_service.log_warning(f"Assuré principal non créé", {
+                            "nom": name,
+                            "status": row["insured_status"]
+                        }, line_index=index)
 
-        df_primary = df[df["insured_status"].str.upper() == "A"]
-        for index, row in df_primary.iterrows():
-            try:
-                name = row["beneficiary_name"]
-                insured = self.get_or_create_primary_insured(name, row["insured_status"])
-                if insured:
-                    insured_dict[name.strip()] = insured
-                    insured_created += 1
-            except Exception as e:
-                self.errors.append(f"[ETAPE 2 - index {index}] Erreur création assuré principal '{row['beneficiary_name']}' : {e}")
+                except Exception as e:
+                    step2_errors += 1
+                    self.logger_service.log_error(
+                        f"Erreur création assuré principal",
+                        details={"nom": row.get('beneficiary_name', 'N/A')},
+                        line_index=index,
+                        exception=e
+                    )
+                    self.errors.append(f"[ÉTAPE 2 - ligne {index}] {str(e)}")
 
+            self.logger_service.log_step_end("Création des assurés principaux", step2_errors == 0, {
+                "erreurs": step2_errors,
+                "assurés_créés": insured_created,
+                "lignes_traitées": len(df_primary)
+            })
 
-        df_dependents = df[df["insured_status"].str.upper().isin(["C", "E"])]
-        for index, row in df_dependents.iterrows():
-            try:
-                name = row["beneficiary_name"]
-                statut = row["insured_status"]
-                principal_name = row["main_insured"]
-                insured = self.get_or_create_dependent_insured(name, statut, principal_name, insured_dict)
-                if insured:
-                    insured_dict[name.strip()] = insured
-                    insured_created += 1
-            except Exception as e:
-                self.errors.append(f"[ETAPE 3 - index {index}] Erreur création assuré dépendant '{row['beneficiary_name']}' : {e}")
+            # ÉTAPE 3: Création des assurés dépendants
+            self.logger_service.log_step_start("Création des assurés dépendants", 4)
+            df_dependents = df[df["insured_status"].str.upper().isin(["C", "E"])]
+            step3_errors = 0
+            
+            for index, row in df_dependents.iterrows():
+                try:
+                    name_primary = row["main_insured"]
+                    if name_primary not in insured_dict:
+                        self.logger_service.log_warning(
+                            f"Assuré principal manquant, création automatique",
+                            details={
+                                "nom_principal": name_primary,
+                                "dépendant": row["beneficiary_name"]
+                            },
+                            line_index=index
+                        )
+                        
+                        primary_insured = self.get_or_create_primary_insured(name_primary, "A")
+                        if primary_insured:
+                            insured_dict[name_primary.strip()] = primary_insured
+                            insured_created += 1
 
+                    name = row["beneficiary_name"]
+                    statut = row["insured_status"]
+                    principal_name = row["main_insured"]
+                    insured = self.get_or_create_dependent_insured(name, statut, principal_name, insured_dict)
+                    
+                    if insured:
+                        insured_dict[name.strip()] = insured
+                        insured_created += 1
+                        self.logger_service.log_info(f"✅ Assuré dépendant créé: {insured.name}", {
+                            "ligne": index,
+                            "status": statut,
+                            "principal": principal_name
+                        })
 
-        for index, row in df.iterrows():
-            try:
-                name = row["beneficiary_name"].strip()
-                insured = insured_dict.get(name)
-                if not insured:
-                    raise Exception(f"Aucun assuré trouvé pour '{name}'")
+                except Exception as e:
+                    step3_errors += 1
+                    self.logger_service.log_error(
+                        f"Erreur création assuré dépendant",
+                        details={
+                            "nom": row.get('beneficiary_name', 'N/A'),
+                            "principal": row.get('main_insured', 'N/A')
+                        },
+                        line_index=index,
+                        exception=e
+                    )
+                    self.errors.append(f"[ÉTAPE 3 - ligne {index}] {str(e)}")
 
-                provider = self.get_or_create_partner(row["partner_name"], row["partner_country"], self.user)
-                invoice = self.get_or_create_invoice(row["invoice_number"], row["claimed_amount"], row["reimbursed_amount"], provider, insured)
+            self.logger_service.log_step_end("Création des assurés dépendants", step3_errors == 0, {
+                "erreurs": step3_errors,
+                "dépendants_créés": insured_created - len(df_primary),
+                "lignes_traitées": len(df_dependents)
+            })
 
-                cat = self.get_or_create_category(row["act_category"])
-                fam = self.get_or_create_family(row["act_family"], cat)
-                act = self.get_or_create_act(row["act_name"], fam, cat)
+            # ÉTAPE 4: Création des sinistres et factures
+            self.logger_service.log_step_start("Création des sinistres et factures", 5)
+            step4_errors = 0
+            
+            for index, row in df.iterrows():
+                try:
+                    name = row["beneficiary_name"].strip()
+                    insured = insured_dict.get(name)
+                    
+                    if not insured:
+                        self.logger_service.log_error(
+                            f"Assuré introuvable pour le sinistre",
+                            details={
+                                "nom_recherché": name,
+                                "claim_id": row.get("claim_id", "N/A"),
+                                "assurés_disponibles": list(insured_dict.keys())[:5]  # Limite à 5 pour lisibilité
+                            },
+                            line_index=index
+                        )
+                        raise Exception(f"Aucun assuré trouvé pour '{name}'")
 
-                operator = self.get_or_create_operator(row["modified_by"])
-                client = self.get_or_create_client(row["employer_name"], self.country, self.file)
-                policy = self.get_or_create_policy(row["policy_number"], client)
+                    # Création des objets liés
+                    provider = self.get_or_create_partner(row["partner_name"], row["partner_country"])
+                    invoice = self.get_or_create_invoice(
+                        row["invoice_number"], 
+                        row["amount_claimed"], 
+                        row["amount_reimbursed"], 
+                        provider, 
+                        insured
+                    )
 
-                claim = self.get_or_create_claim(
-                    claim_id=row["claim_id"],
-                    status=row["claim_status"],
-                    date_claim=row["claim_date"],
-                    settlement_date=row["incident_date"],
-                    invoice=invoice,
-                    act=act,
-                    operator=operator,
-                    insured=insured,
-                    partner=provider,
-                    policy=policy,
-                    file=self.file
-                )
-                if claim:
-                    claims_created += 1
-                    total_claimed += row["claimed_amount"] or 0
-                    total_reimbursed += row["reimbursed_amount"] or 0
+                    cat = self.get_or_create_category(row["act_category"])
+                    fam = self.get_or_create_family(row["act_family"], cat)
+                    act = self.get_or_create_act(row["act_name"], fam)
+                    operator = self.get_or_create_operator(row["modified_by"])
+                    client = self.get_or_create_client(row["employer_name"])
+                    policy = self.get_or_create_policy(row["policy_number"], client)
 
-            except Exception as e:
-                self.errors.append(f"[ETAPE 4 - index {index}] Erreur sinistre/facture '{row['claim_id']}' : {e}")
-        
+                    claim = self.get_or_create_claim(
+                        claim_id=row["claim_id"],
+                        status=row["claim_status"],
+                        date_claim=row["payment_date"],
+                        settlement_date=row["incident_date"],
+                        invoice=invoice,
+                        act=act,
+                        operator=operator,
+                        insured=insured,
+                        partner=provider,
+                        policy=policy,
+                    )
+                    
+                    if claim:
+                        claims_created += 1
+                        total_claimed += row["amount_claimed"] or 0
+                        total_reimbursed += row["amount_reimbursed"] or 0
+                        
+                        self.logger_service.log_info(f"✅ Sinistre créé: {claim.id}", {
+                            "ligne": index,
+                            "assuré": insured.name,
+                            "montant_réclamé": row["amount_claimed"],
+                            "montant_remboursé": row["amount_reimbursed"]
+                        })
 
-        self.import_session.insured_created_count = insured_created
-        self.import_session.claims_created_count = claims_created
-        self.import_session.total_claimed_amount = total_claimed
-        self.import_session.total_reimbursed_amount = total_reimbursed
+                except Exception as e:
+                    step4_errors += 1
+                    self.logger_service.log_error(
+                        f"Erreur création sinistre/facture",
+                        details={
+                            "claim_id": row.get("claim_id", "N/A"),
+                            "beneficiary_name": row.get("beneficiary_name", "N/A"),
+                            "invoice_number": row.get("invoice_number", "N/A")
+                        },
+                        line_index=index,
+                        exception=e
+                    )
+                    self.errors.append(f"[ÉTAPE 4 - ligne {index}] {str(e)}")
 
-        self.import_session.save()
+            self.logger_service.log_step_end("Création des sinistres et factures", step4_errors == 0, {
+                "erreurs": step4_errors,
+                "sinistres_créés": claims_created,
+                "total_réclamé": total_claimed,
+                "total_remboursé": total_reimbursed
+            })
+
+            # Mise à jour de la session d'import
+            self.import_session.insured_created_count = insured_created
+            self.import_session.claims_created_count = claims_created
+            self.import_session.total_claimed_amount = total_claimed
+            self.import_session.total_reimbursed_amount = total_reimbursed
+            self.import_session.save()
+
+            # Résumé final
+            self.logger_service.log_step_start("RÉSUMÉ FINAL DE L'IMPORT")
+            self.logger_service.log_info("Import terminé", {
+                "session_id": self.import_session.id,
+                "assurés_créés": insured_created,
+                "sinistres_créés": claims_created,
+                "total_réclamé": total_claimed,
+                "total_remboursé": total_reimbursed,
+                "erreurs_totales": len(self.errors),
+                "fichier_log": self.logger_service.get_log_file_path()
+            })
+
+            if self.errors:
+                self.logger_service.log_warning(f"Import terminé avec {len(self.errors)} erreurs", {
+                    "liste_erreurs": self.errors
+                })
+                
+        except Exception as e:
+            self.logger_service.log_critical("Erreur critique durant le mapping", exception=e)
+            raise
+        finally:
+            # Sauvegarde du chemin du fichier de log dans la session
+            self.import_session.log_file_path = self.logger_service.get_log_file_path()
+            self.import_session.save()
+            self.logger_service.close()
+
 
 
 
@@ -185,7 +371,7 @@ class DataMapper:
         return ActFamily.objects.get_or_create(label=label.strip().upper(), category=category)[0]
 
     @staticmethod
-    def get_or_create_act(label, family, category):
+    def get_or_create_act(label, family):
         """
         Retrieves or creates an Act object based on the given label, family, and category.
 
@@ -203,10 +389,10 @@ class DataMapper:
             label = label.strip().upper()
         else:
             label = " "
-        return Act.objects.get_or_create(label=label.strip().upper(), category=category, family=family)[0]
+        return Act.objects.get_or_create(label=label.strip().upper(), family=family)[0]
 
 
-    def get_or_create_partner(self, name, country_name, user):                
+    def get_or_create_partner(self, name, country_name):                
         """
         Retrieves or creates a Partner object based on the given name, country name, and user.
 
@@ -236,7 +422,7 @@ class DataMapper:
                 f"Ni '{country_name}' ni le pays de l'utilisateur ({getattr(user, 'username', user)}) n'existent."
             )
 
-        return Partner.objects.get_or_create(name=name.strip().upper(), user=user, country=country)[0]
+        return Partner.objects.get_or_create(name=name.strip().upper(), country=country)[0]
     
     @staticmethod
     def get_or_create_payment_method(number, date, provider):            
@@ -487,3 +673,5 @@ class DataMapper:
                 file=self.file
             )
         )[0]
+
+

@@ -15,8 +15,8 @@ COLUMN_SYNONYMS = {
 
     'assures_principal': 'main_insured',
     'assure_principal': 'main_insured',
-    'nom_assuré_principal': 'main_insured',
     'nom_assures_principal': 'main_insured',
+    'nom_assure_principal': 'main_insured',
 
     'partnerid': 'partner_name',
     'nom_du_partenaire': 'partner_name',
@@ -30,7 +30,7 @@ COLUMN_SYNONYMS = {
     'numero_police': 'policy_number',
 
 
-    'n°_cheque': 'payment_method',
+    'n°_cheque': 'payment_cheque',
     'autres_moyen_de_payement': 'payment_method',
     'n°cheque/autre_moyent_de_payement': 'payment_method',
 
@@ -47,16 +47,15 @@ COLUMN_SYNONYMS = {
     'note': 'note',
     'note_generale': 'note',
 
-    # Champs supplémentaires pour STAT
-    'broker name': 'broker_name',
+    'broker_name': 'broker_name',
     'statut_assure': 'insured_status',
     'statut': 'claim_status',
     'categorie_d\'acte': 'act_category',
     'famille_acte': 'act_family',
     'nom_acte': 'act_name',
-    'adresse du partenaire': 'partner_address',
-    'pays du partenaire': 'partner_country',
+    'adresse_du_partenaire': 'partner_address',
+    'pays_du_partenaire': 'partner_country',
     'date_de_sinistre': 'incident_date',
     'date_sinistre': 'incident_date',
-    'modifié par': 'modified_by',
+    'modifie_par': 'modified_by',
 }

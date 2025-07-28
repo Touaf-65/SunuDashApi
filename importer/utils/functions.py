@@ -109,13 +109,15 @@ def clean_text_columns(df: pd.DataFrame) -> pd.DataFrame:
         pd.DataFrame: The cleaned DataFrame with normalized text columns.
     """
     for col in df.columns:
-        if df[col].dtype == 'object' or pd.api.types.is_string_dtype(df[col]):
-            df[col] = (
-                df[col]
-                .astype(str)
-                .str.strip()
-                .str.replace(r'\s+', ' ', regex=True)
-            )
+        try:
+            if col in df.columns and pd.api.types.is_string_dtype(df[col]):
+                df.loc[:, col] = (
+                    df[col]
+                    .str.strip()
+                    .str.replace(r'\s+', ' ', regex=True)
+                )
+        except Exception as e:
+            print(f"Error processing column {col}: {e}")
     return df
 
 
@@ -136,6 +138,7 @@ def replace_invalid_numeric_values(df, column, replacement_value=0):
         df[column] = pd.to_numeric(df[column], errors='coerce').fillna(0) 
     else:
         raise KeyError(f"La colonne '{column}' n'existe pas dans le DataFrame.")
+
 
 
 def convert_dates_datetime(df, column, format=None):
@@ -181,6 +184,8 @@ def get_date_range(df, column):
         return (df[column].min(), df[column].max())
     else:
         raise TypeError(f"La colonne '{column}' n'est pas de type datetime.")
+
+
 
 
 def get_common_date_range(range1, range2):
@@ -239,6 +244,10 @@ def group_statistic_by_sinistre(df):
                         'policy_number', 'partner_name', 'incident_date', 
                         'payment_date', 'claim_status', 'amount_claimed', 'amount_reimbursed']
     
+    missing_colums = [col for col in required_columns if col not in df.columns]
+    if missing_colums:
+        raise KeyError(f"Les colonnes suivantes sont manquantes: {missing_colums}")
+
     if not all(col in df.columns for col in required_columns):
         raise KeyError("Une ou plusieurs colonnes obligatoires sont manquantes.")
 
@@ -248,7 +257,7 @@ def group_statistic_by_sinistre(df):
         # 'claim_id': 'first',
         'partner_name': 'first',
         'incident_date': 'first',
-        'claim_id': 'first',
+        'insured_status': 'first',
         'claim_status': 'first',
         'amount_claimed': 'sum',
         'amount_reimbursed': 'sum',
@@ -261,6 +270,8 @@ def group_statistic_by_sinistre(df):
         raise ValueError("Des doublons ont été détectés sur les numéros de sinistre.")
     
     return grouped
+
+
 
 
 def convert_to_upper(df, column):
@@ -282,7 +293,8 @@ def convert_to_upper(df, column):
     return df
 
 
-def convert_df_to_upper(df):
+
+def convert_df_to_upper(df: pd.DataFrame) -> pd.DataFrame:
     """
     Converts all values in a DataFrame to uppercase.
 
@@ -292,10 +304,23 @@ def convert_df_to_upper(df):
     Returns:
         pd.DataFrame: The modified DataFrame.
     """
+    # Vérification que df est bien un DataFrame
+    if not isinstance(df, pd.DataFrame):
+        raise ValueError("L'argument doit être un DataFrame.")
+
+    # print(f"Type de df: {type(df)}")
+    # print(f"Colonnes dans df: {df.columns.tolist()}")
+
+    # print(f"Type de df[employer_name]: {df['employer_name'].dtype}")
+
     for column in df.columns:
-        if df[column].dtype == 'object':
-            df[column] = df[column].str.upper()
+        column_data = df.get(column)
+        if column_data is not None and column_data.dtype == 'object':
+            df.loc[:, column] = column_data.str.upper()  
+
     return df
+
+
 
 
 def check_conformity(row):
@@ -308,7 +333,7 @@ def check_conformity(row):
     Returns:
         str: 'Conforme' if the row is conforming, 'Non conforme' otherwise.
     """
-    if -5 < abs(row["billed_amount_diff"]) < 5 and -5 < abs(row["reimbursed_amount_diff"]) < 5:
+    if -5 < abs(row["billed_amount_diff"]) < 5 and -5 < abs(row["reimbursement_amount_diff"]) < 5:
         return "Conforme"
     else:
         return "Non conforme"
@@ -362,8 +387,8 @@ def delete_conform_rows(df):
     Returns:
         pd.DataFrame: The filtered DataFrame without conforming rows.
     """
-    df_filtre = df[~((df['amount_claimed'] == df['Total facturé rapprochement']) & 
-                     (df['amount_reimbursed'] == df['Total remboursé rapprochement']))]
+    df_filtre = df[~((df['amount_claimed'] == df['amount_claimed_recap']) & 
+                     (df['amount_reimbursed'] == df['amount_reimbursed_recap']))]
     return df_filtre
 
 
@@ -377,7 +402,7 @@ def string_to_upper(df):
     Returns:
         pd.DataFrame: The modified DataFrame.
     """
-    df = df.copy()  # Avoid modifying the original DataFrame
+    df = df.copy()  
     for col in df.columns:
         if df[col].dtype == 'object':  
             df[col] = df[col].str.upper()
@@ -440,6 +465,10 @@ def generate_no_conformity_excel(df, df_stat, df_recap):
 
     df_stat_filtered = df_stat[df_stat['claim_id'].isin(numeros_sinistre)]
     df_recap_filtered = df_recap[df_recap['claim_id'].isin(numeros_sinistre)]
+
+    df.to_excel(file_path, sheet_name='Non Conformités', index=False)
+    # df_stat_filtered.to_excel(file_path, sheet_name='Statistiques Filtrées', index=False)
+    # df_recap_filtered.to_excel(file_path, sheet_name='Récapitulatif Filtré', index=False)
 
     if df.empty or df_stat_filtered.empty or df_recap_filtered.empty:
         raise ValueError("Un ou plusieurs DataFrames sont vides.")
