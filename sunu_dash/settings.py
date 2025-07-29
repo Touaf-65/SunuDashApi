@@ -13,7 +13,7 @@ SECRET_KEY = "django-insecure-b(b)a@y8aqtlh_7ldbjsf*n%2az=6%1tog%py2dm5t-(0qiyx#
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['sunudash-api-v2.onrender.com', '127.0.0.1']
+ALLOWED_HOSTS = ['sunudashapi.onrender.com', '127.0.0.1']
 # ALLOWED_HOSTS = ['127.0.0.1']
 
 
@@ -51,7 +51,7 @@ MIDDLEWARE = [
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:4200",  # URL du frontend Angular
-    "https://sunudash-api-v2.onrender.com",
+    "https://sunudashapi.onrender.com",
     "https://sunudash.netlify.app"
 ]
 
