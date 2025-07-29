@@ -169,7 +169,6 @@ class GetConnectedUserByLogin(APIView):
         - 404 Not Found: If no user matches the provided login.
         - 500 Internal Server Error: For unexpected errors.
     """
-    permission_classes = [IsAuthenticated]
 
     def get(self, request, login):
         try:
