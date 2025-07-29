@@ -1,15 +1,12 @@
 import pandas as pd
 
 from core.models import (
-    Client, Policy, Insured, Invoice, Partner, 
+    Client, Policy, Insured, Invoice, Partner, InsuredEmployer,
     PaymentMethod, Operator, Claim, Act, ActFamily, ActCategory
 )
 from users.models import Country
 from datetime import datetime
 from django.utils.timezone import make_aware, is_naive
-from rest_framework.response import Response
-from rest_framework import status
-# from .logging_service import ImportLoggerService
 from importer.services.logging_service import ImportLoggerService
 
 class DataMapper:
@@ -51,9 +48,11 @@ class DataMapper:
             
             df = self.df_stat.copy()
             insured_dict = {}
+            insured_employer_dict = {}
             
             # Compteurs
             insured_created = 0
+            insured_employers_created = 0
             claims_created = 0
             total_claimed = 0
             total_reimbursed = 0
@@ -219,9 +218,80 @@ class DataMapper:
                 "lignes_traitées": len(df_dependents)
             })
 
-            # ÉTAPE 4: Création des sinistres et factures
-            self.logger_service.log_step_start("Création des sinistres et factures", 5)
+
+            # ÉTAPE 4: Création des relations InsuredEmployer
+            self.logger_service.log_step_start("Création des relations Assuré-Employeur", 5)
             step4_errors = 0
+            
+            for index, row in df.iterrows():
+                try:
+                    name = row["beneficiary_name"].strip()
+                    insured = insured_dict.get(name)
+                    
+                    if not insured:
+                        self.logger_service.log_error(
+                            f"Assuré introuvable pour la relation InsuredEmployer",
+                            details={
+                                "nom_recherché": name,
+                                "employer_name": row.get("employer_name", "N/A")
+                            },
+                            line_index=index
+                        )
+                        step4_errors += 1
+                        continue
+
+                    client = self.get_or_create_client(row["employer_name"])
+                    policy = self.get_or_create_policy(row["policy_number"], client)
+                    
+                    # Créer la relation InsuredEmployer
+                    insured_employer = self.get_or_create_insured_employer(
+                        insured=insured,
+                        employer=client,
+                        policy=policy,
+                        status=row["insured_status"],
+                        insured_dict=insured_dict,
+                        main_insured_name=row.get("main_insured", "")
+                    )
+                    
+                    if insured_employer:
+                        # Créer une clé unique pour éviter les doublons
+                        ie_key = f"{insured.id}_{client.id}_{policy.id}"
+                        if ie_key not in insured_employer_dict:
+                            insured_employer_dict[ie_key] = insured_employer
+                            insured_employers_created += 1
+                            
+                        self.logger_service.log_info(f"✅ Relation InsuredEmployer créée", {
+                            "ligne": index,
+                            "assuré": insured.name,
+                            "employeur": client.name,
+                            "police": policy.policy_number,
+                            "role": insured_employer.role
+                        })
+
+                except Exception as e:
+                    step4_errors += 1
+                    self.logger_service.log_error(
+                        f"Erreur création relation InsuredEmployer",
+                        details={
+                            "nom": row.get('beneficiary_name', 'N/A'),
+                            "employeur": row.get("employer_name", "N/A"),
+                            "police": row.get("policy_number", "N/A")
+                        },
+                        line_index=index,
+                        exception=e
+                    )
+                    self.errors.append(f"[ÉTAPE 4 - ligne {index}] {str(e)}")
+
+            self.logger_service.log_step_end("Création des relations Assuré-Employeur", step4_errors == 0, {
+                "erreurs": step4_errors,
+                "relations_créées": insured_employers_created,
+                "lignes_traitées": len(df)
+            })
+
+
+            # ÉTAPE 5: Création des sinistres et factures
+            self.logger_service.log_step_start("Création des sinistres et factures", 5)
+            step5_errors = 0
             
             for index, row in df.iterrows():
                 try:
@@ -283,7 +353,7 @@ class DataMapper:
                         })
 
                 except Exception as e:
-                    step4_errors += 1
+                    step5_errors += 1
                     self.logger_service.log_error(
                         f"Erreur création sinistre/facture",
                         details={
@@ -294,10 +364,10 @@ class DataMapper:
                         line_index=index,
                         exception=e
                     )
-                    self.errors.append(f"[ÉTAPE 4 - ligne {index}] {str(e)}")
+                    self.errors.append(f"[ÉTAPE 5 - ligne {index}] {str(e)}")
 
-            self.logger_service.log_step_end("Création des sinistres et factures", step4_errors == 0, {
-                "erreurs": step4_errors,
+            self.logger_service.log_step_end("Création des sinistres et factures", step5_errors == 0, {
+                "erreurs": step5_errors,
                 "sinistres_créés": claims_created,
                 "total_réclamé": total_claimed,
                 "total_remboursé": total_reimbursed
@@ -337,6 +407,81 @@ class DataMapper:
             self.logger_service.close()
 
 
+
+
+    def get_or_create_insured_employer(self, insured, employer, policy, status, insured_dict, main_insured_name):
+        """
+        Crée ou récupère une relation InsuredEmployer.
+        
+        Args:
+            insured (Insured): L'assuré
+            employer (Client): L'employeur/client
+            policy (Policy): La police
+            status (str): Le statut de l'assuré (A, C, E)
+            insured_dict (dict): Dictionnaire des assurés créés
+            main_insured_name (str): Nom de l'assuré principal (pour les dépendants)
+            
+        Returns:
+            InsuredEmployer: La relation créée ou récupérée
+        """
+        try:
+            # Déterminer le rôle basé sur le statut
+            role = {'A': 'primary', 'C': 'spouse', 'E': 'child'}.get(status.upper(), 'other')
+            
+            # Déterminer la référence de l'assuré principal
+            primary_insured_ref = None
+            if role != 'primary' and main_insured_name:
+                primary_insured_ref = insured_dict.get(main_insured_name.strip())
+                if not primary_insured_ref:
+                    self.logger_service.log_warning(
+                        f"Assuré principal non trouvé pour {insured.name}",
+                        details={
+                            "nom_principal_recherché": main_insured_name,
+                            "role": role
+                        }
+                    )
+            
+            insured_employer, created = InsuredEmployer.objects.get_or_create(
+                insured=insured,
+                employer=employer,
+                policy=policy,
+                defaults=dict(
+                    role=role,
+                    primary_insured_ref=primary_insured_ref,
+                    file=self.file,
+                    import_session=self.import_session
+                )
+            )
+            
+            if created:
+                self.logger_service.log_info(f"Nouvelle relation InsuredEmployer créée", {
+                    "assuré": insured.name,
+                    "employeur": employer.name,
+                    "police": policy.policy_number,
+                    "role": role,
+                    "principal_ref": primary_insured_ref.name if primary_insured_ref else None
+                })
+            else:
+                self.logger_service.log_info(f"Relation InsuredEmployer existante trouvée", {
+                    "assuré": insured.name,
+                    "employeur": employer.name,
+                    "police": policy.policy_number
+                })
+            
+            return insured_employer
+            
+        except Exception as e:
+            self.logger_service.log_error(
+                f"Erreur lors de la création de InsuredEmployer",
+                details={
+                    "assuré": insured.name,
+                    "employeur": employer.name,
+                    "police": policy.policy_number,
+                    "status": status
+                },
+                exception=e
+            )
+            raise
 
 
     @staticmethod

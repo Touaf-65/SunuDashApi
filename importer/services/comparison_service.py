@@ -18,11 +18,9 @@ class ComparisonService:
 
         recap_range = get_date_range(df_recap, 'payment_date')
 
-        # print(f"Range date de recap: {recap_range}")
 
         stat_range = get_date_range(df_stat, 'payment_date')
 
-        # print(f"Range date de stat: {stat_range}")
 
         common_range = get_common_date_range(stat_range, recap_range)
 

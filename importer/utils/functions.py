@@ -130,12 +130,17 @@ def replace_invalid_numeric_values(df, column, replacement_value=0):
         column (str): The name of the column to process.
         replacement_value: The value to replace non-numeric values with.
 
+    Returns:
+        pd.DataFrame: A copy of the DataFrame with the modified column.
+        
     Raises:
         KeyError: If the specified column does not exist in the DataFrame.
     """
     if column in df.columns:
-        df[column] = df[column].replace({',': '.', '–': '0', '-': '0'}, regex=True)
-        df[column] = pd.to_numeric(df[column], errors='coerce').fillna(0) 
+        df = df.copy()
+        df.loc[:, column] = df[column].replace({',': '.', '–': '0', '-': '0'}, regex=True)
+        df.loc[:, column] = pd.to_numeric(df[column], errors='coerce').fillna(0)
+        return df
     else:
         raise KeyError(f"La colonne '{column}' n'existe pas dans le DataFrame.")
 
@@ -151,18 +156,32 @@ def convert_dates_datetime(df, column, format=None):
         format (str): Optional format string for parsing dates.
 
     Returns:
-        pd.DataFrame: The DataFrame with the converted column.
+        pd.DataFrame: A copy of the DataFrame with the converted column.
+        
+    Raises:
+        KeyError: If the specified column does not exist in the DataFrame.
     """
     if column in df.columns:
+        df = df.copy()
         column_type = df[column].dtype
 
         if column_type == 'object':
-            df[column] = pd.to_datetime(df[column], format=format, errors='coerce', dayfirst=True)
+            df.loc[:, column] = pd.to_datetime(
+                df[column], 
+                format=format, 
+                errors='coerce', 
+                dayfirst=True
+            )
         elif column_type in ['int64', 'int32']:
-            df[column] = pd.to_datetime(df[column], origin='1899-12-30', unit='D', dayfirst=True)
+            df.loc[:, column] = pd.to_datetime(
+                df[column], 
+                origin='1899-12-30', 
+                unit='D', 
+                dayfirst=True
+            )
+        return df
     else:
         raise KeyError(f"La colonne '{column}' n'existe pas dans le DataFrame.")
-    return df
 
 
 def get_date_range(df, column):
