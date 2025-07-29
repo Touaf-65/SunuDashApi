@@ -2,3 +2,13 @@
 
 DELETE FROM core_actfamily;
 DELETE FROM core_actcategory;
+
+DELETE FROM core_act;
+DELETE FROM core_partner;
+DELETE FROM core_paymentmethod;
+DELETE FROM core_operator;
+DELETE FROM core_client;
+DELETE FROM core_policy;
+DELETE FROM core_insured;
+DELETE FROM core_invoice;
+DELETE FROM core_claim;

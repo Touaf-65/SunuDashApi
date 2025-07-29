@@ -17,7 +17,7 @@ class File(models.Model):
 
 
     file = models.FileField(upload_to='uploads/')
-    file_name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255)
     file_type = models.CharField(max_length=5, choices=FILE_TYPE_CHOICES)
     uploaded_at = models.DateTimeField(auto_now_add=True)
     size = models.CharField(max_length=20, editable=False)
@@ -97,9 +97,8 @@ class ImportSession(models.Model):
     log_file_path = models.CharField(max_length=500, blank=True, null=True)
     
     def get_log_file_url(self):
-        """Retourne l'URL du fichier de log s'il existe"""
+        """Returns the URL of the log file if it exists"""
         if self.log_file_path and os.path.exists(self.log_file_path):
-            # Convertit le chemin absolu en URL relative
             relative_path = os.path.relpath(self.log_file_path, settings.MEDIA_ROOT)
             return f"{settings.MEDIA_URL}{relative_path}"
         return None
