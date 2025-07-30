@@ -159,10 +159,7 @@ class ListCountriesView(APIView):
         else:
             countries = Country.objects.filter(is_active=True)
             serializer = CountrySerializer(countries, many=True)
-            # Remove `is_active` from output
-            for data in serializer.data:
-                data.pop('is_active', None)
-
+            
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
