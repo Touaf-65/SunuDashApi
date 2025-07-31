@@ -3,10 +3,13 @@ from .models import CustomUser, PasswordResetToken
 from countries.models import Country
 
 
+class CountrySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Country
+        fields = ('id', 'name', 'code')  
+
 class UserSerializer(serializers.ModelSerializer):
-    country = serializers.PrimaryKeyRelatedField(
-        queryset=Country.objects.all(), required=False, allow_null=True
-    )
+    country = CountrySerializer(read_only=True)
 
     class Meta:
         model = CustomUser

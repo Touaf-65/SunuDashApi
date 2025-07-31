@@ -1503,6 +1503,11 @@ class SimpleUserDeleteView(APIView, SimpleUserMixin):
     permission_classes = [IsAuthenticated, IsTerritorialAdmin, IsTerritorialAdminAndAssignedCountry]
 
     def delete(self, request, pk):
+        if not request.user.is_active:
+            return Response(
+                {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération. Veuillez contacter votre administrateur hiérarchique."},
+                status=status.HTTP_403_FORBIDDEN
+            )
         user = self.get_object(pk)
         if not user:
             return Response({"error": "Utilisateur non trouvé."}, status=status.HTTP_404_NOT_FOUND)
