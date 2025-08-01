@@ -8,6 +8,7 @@ urlpatterns = [
     path("data/", include("importer.urls")),
     path("files/", include("file_handling.file_urls")),
     path("import-sessions/", include("file_handling.importSession_urls")),
+    path("dashboard/", include("dashboard.urls")),
 ]
 
 from django.conf import settings

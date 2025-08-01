@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "file_handling",
     "core",
     "importer",
+    "dashboard"
 ]
 
 AUTH_USER_MODEL = 'users.CustomUser'
