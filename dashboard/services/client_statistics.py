@@ -734,3 +734,137 @@ class ClientStatisticsService:
                 "primary_insured_evolution_rate": 0.0,
                 "total_insured_evolution_rate": 0.0,
             }
+
+
+
+
+class ClientStatisticListService:
+    """
+    Service to generate statistics list for all clients in a country over a given period.
+    """
+    
+    def __init__(self, country_id, date_start_str, date_end_str):
+        """
+        Initialize the service with country ID and date range.
+        
+        Args:
+            country_id (int): ID of the country
+            date_start_str (str): Start date in YYYY-MM-DD format
+            date_end_str (str): End date in YYYY-MM-DD format
+        """
+        self.country_id = country_id
+        self.date_start, self.date_end = parse_date_range(date_start_str, date_end_str)
+        
+        try:
+            self._setup_base_filters()
+        except Exception as e:
+            logger.error(f"Error initializing ClientStatisticListService: {e}")
+            raise
+    
+    def _setup_base_filters(self):
+        """
+        Set up base querysets for clients and related data.
+        """
+        try:
+            # Base clients queryset for the country
+            self.clients = Client.objects.select_related('country').filter(
+                country_id=self.country_id
+            )
+            
+            # Validate that country exists
+            if not self.clients.exists():
+                logger.warning(f"No clients found for country_id: {self.country_id}")
+            
+            # Standard logging for monitoring
+            logger.info(f"Country {self.country_id}: {self.clients.count()} clients found")
+            
+        except Exception as e:
+            logger.error(f"Error setting up base filters: {e}")
+            raise ValidationError(f"Error setting up filters: {e}")
+    
+    def get_clients_statistics_list(self):
+        """
+        Generate statistics list for all clients in the country.
+        
+        Returns:
+            list: List of client statistics dictionaries
+        """
+        try:
+            results = []
+            
+            for client in self.clients:
+                client_stats = self._get_client_statistics(client)
+                results.append(client_stats)
+            
+            # Sanitize all float values to prevent JSON serialization errors
+            return sanitize_float(results)
+            
+        except Exception as e:
+            logger.error(f"Error generating clients statistics list: {e}")
+            return []
+    
+    def _get_client_statistics(self, client):
+        """
+        Get statistics for a single client.
+        
+        Args:
+            client: Client object
+            
+        Returns:
+            dict: Client statistics
+        """
+        try:
+            # Get policies count
+            nb_policies = Policy.objects.filter(client=client).count()
+            
+            # Get insured employees for this client
+            insured_links = InsuredEmployer.objects.select_related('insured').filter(
+                employer=client
+            )
+            nb_primary = insured_links.filter(role='primary').count()
+            nb_total = insured_links.count()
+            
+            # Get insured IDs for claims filtering
+            insured_ids = list(insured_links.values_list('insured_id', flat=True))
+            
+            # Get claims for this client in the date range
+            # Use both insured and policy relationships like in ClientStatisticsService
+            claims = Claim.objects.select_related('invoice').filter(
+                Q(insured_id__in=insured_ids) | Q(policy__client_id=client.id),
+                settlement_date__range=(self.date_start, self.date_end),
+                invoice__isnull=False
+            )
+            
+            # Calculate consumption and reimbursement totals
+            consumption_data = claims.aggregate(
+                total_consumption=Sum('invoice__claimed_amount'),
+                total_reimbursement=Sum('invoice__reimbursed_amount')
+            )
+            
+            total_consumption = float(consumption_data['total_consumption'] or 0)
+            total_reimbursement = float(consumption_data['total_reimbursement'] or 0)
+            
+            return {
+                "client_id": client.id,
+                "client_name": client.name,
+                "contact": client.contact,
+                "nb_policies": nb_policies,
+                "nb_primary_insured": nb_primary,
+                "nb_total_insured": nb_total,
+                "total_consumption": total_consumption,
+                "total_reimbursement": total_reimbursement
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating statistics for client {client.id}: {e}")
+            return {
+                "client_id": client.id,
+                "client_name": client.name,
+                "contact": client.contact or "",
+                "nb_policies": 0,
+                "nb_primary_insured": 0,
+                "nb_total_insured": 0,
+                "total_consumption": 0.0,
+                "total_reimbursement": 0.0
+            }
+

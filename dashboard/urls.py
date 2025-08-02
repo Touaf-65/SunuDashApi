@@ -1,5 +1,6 @@
 from django.urls import path
-from .views import (CountryStatisticsDetailView, GlobalStatisticsDetailView, CountriesListStatisticsView, ClientStatisticView
+from .views import (CountryStatisticsDetailView, GlobalStatisticsDetailView, CountriesListStatisticsView, ClientStatisticView,
+ ClientStatisticListView,
 )
 
 urlpatterns = [
@@ -7,4 +8,5 @@ urlpatterns = [
     path('global/statistics/', GlobalStatisticsDetailView.as_view(), name='global-statistics-detail'), 
     path('countries/statistics/', CountriesListStatisticsView.as_view(), name='countries-list-statistics-detail'),
     path('clients/<int:client_id>/statistics/', ClientStatisticView.as_view(), name='client-statistics-detail'),
+    path('clients/statistics/', ClientStatisticListView.as_view(), name='client-statistics-list-detail'),
 ]
