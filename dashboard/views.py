@@ -8,7 +8,8 @@ from .services.country_statistics import CountryStatisticsService
 from .services.global_statistics import GlobalStatisticsService, CountriesListStatisticsService
 from .services.client_statistics import ClientStatisticsService, ClientStatisticListService
 from .services.policy_statistics import ClientPolicyStatisticsService, ClientPolicyListStatisticsService
-from .services.partner_statistics import PartnerStatisticsService, PartnerListStatisticsService
+from .services.partner_statistics import (PartnerStatisticsService, PartnerListStatisticsService, CountryPartnerStatisticsService,
+CountryPartnerListStatisticsService)
 import traceback
 
 import logging
@@ -509,3 +510,124 @@ class PartnerListStatisticsView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+
+class CountryPartnerStatisticsView(APIView):
+    """
+    API view to get partner statistics for a specific country.
+    """
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    
+    def post(self, request, country_id):
+        """
+        Generate partner statistics for a specific country.
+        
+        Request body:
+            date_start (str): Start date in YYYY-MM-DD format
+            date_end (str): End date in YYYY-MM-DD format
+            
+        Returns:
+            Response: JSON response with partner statistics for the country
+        """
+        try:
+            # Extract and validate request data
+            date_start = request.data.get('date_start')
+            date_end = request.data.get('date_end')
+            
+            if not date_start or not date_end:
+                return Response(
+                    {"error": "date_start et date_end sont requis."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Initialize and use the service
+            service = CountryPartnerStatisticsService(
+                country_id=country_id,
+                date_start_str=date_start,
+                date_end_str=date_end
+            )
+            
+            # Generate statistics
+            stats = service.get_complete_statistics()
+            
+            return Response(stats, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in country partner statistics: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except ValueError as e:
+            logger.error(f"Value error in country partner statistics: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in country partner statistics: {e}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {"error": "Erreur interne du serveur."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class CountryPartnerListStatisticsView(APIView):
+    """
+    API view to get a list of all partners for a specific country, sorted by consumption.
+    """
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    
+    def post(self, request, country_id):
+        """
+        Get list of all partners for a specific country, sorted by consumption.
+        
+        Request body:
+            date_start (str): Start date in YYYY-MM-DD format
+            date_end (str): End date in YYYY-MM-DD format
+            
+        Returns:
+            Response: JSON response with partners list and summary
+        """
+        try:
+            # Extract and validate request data
+            date_start = request.data.get('date_start')
+            date_end = request.data.get('date_end')
+            
+            if not date_start or not date_end:
+                return Response(
+                    {"error": "date_start et date_end sont requis."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Initialize and use the service
+            service = CountryPartnerListStatisticsService(
+                country_id=country_id,
+                date_start_str=date_start,
+                date_end_str=date_end
+            )
+            
+            # Generate partners list
+            partners_data = service.get_complete_partners_list()
+            
+            return Response(partners_data, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in country partner list: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except ValueError as e:
+            logger.error(f"Value error in country partner list: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in country partner list: {e}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {"error": "Erreur interne du serveur."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

@@ -464,7 +464,6 @@ class PartnerListStatisticsService:
                 partners_list.append({
                     'partner_id': partner['partner_id'],
                     'partner_name': partner['partner__name'],
-                    'country_name': partner['partner__country__name'],
                     'total_claimed': sanitize_float(partner['total_claimed'] or 0),
                     'total_reimbursed': sanitize_float(partner['total_reimbursed'] or 0),
                     'claims_count': int(partner['claims_count'] or 0)
@@ -555,6 +554,152 @@ class PartnerListStatisticsService:
             
         except Exception as e:
             logger.error(f"Error generating complete partners list: {e}")
+            return {
+                'partners_list': [],
+                'summary': {}
+            }
+
+
+class CountryPartnerStatisticsService(PartnerStatisticsService):
+    """
+    Service to generate partner statistics for a specific country over a given period.
+    Extends PartnerStatisticsService with country-specific filtering.
+    """
+
+    def __init__(self, country_id, date_start_str, date_end_str):
+        """
+        Initialize the service with country ID and date range.
+        
+        Args:
+            country_id (int): ID of the country to filter partners
+            date_start_str (str): Start date in YYYY-MM-DD format
+            date_end_str (str): End date in YYYY-MM-DD format
+        """
+        self.country_id = country_id
+        try:
+            # Get the country to verify it exists
+            self.country = Country.objects.get(pk=country_id)
+            super().__init__(date_start_str, date_end_str)
+        except Country.DoesNotExist:
+            logger.error(f"Country with ID {country_id} does not exist")
+            raise ValidationError(f"Pays avec l'ID {country_id} introuvable")
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid parameters for CountryPartnerStatisticsService: {e}")
+            raise ValidationError(f"Paramètres invalides: {e}")
+
+    def _setup_base_filters(self):
+        """
+        Set up base filters with country-specific filtering.
+        Overrides the parent method to add country filter.
+        """
+        try:
+            # Call parent setup first
+            super()._setup_base_filters()
+            
+            # Add country filter to the base claims queryset
+            self.claims = self.claims.filter(partner__country_id=self.country_id)
+            
+            logger.info(f"Country {self.country_id} - Filtered claims count: {self.claims.count()}")
+            
+        except Exception as e:
+            logger.error(f"Error setting up country partner base filters: {e}")
+            raise ValidationError(f"Erreur lors de la configuration des filtres: {e}")
+
+    def get_complete_statistics(self):
+        """
+        Get complete statistics for partners in the specified country.
+        Extends parent method to add country information.
+        """
+        try:
+            stats = super().get_complete_statistics()
+            
+            # Add country information to the stats
+            stats.update({
+                'country': {
+                    'id': self.country.id,
+                    'name': self.country.name,
+                    'code': self.country.code
+                }
+            })
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error generating country partner statistics: {e}")
+            return {}
+
+
+class CountryPartnerListStatisticsService(PartnerListStatisticsService):
+    """
+    Service to retrieve a list of all partners for a specific country, sorted by consumption.
+    Extends PartnerListStatisticsService with country-specific filtering.
+    """
+
+    def __init__(self, country_id, date_start_str, date_end_str):
+        """
+        Initialize the service with country ID and date range.
+        
+        Args:
+            country_id (int): ID of the country to filter partners
+            date_start_str (str): Start date in YYYY-MM-DD format
+            date_end_str (str): End date in YYYY-MM-DD format
+        """
+        self.country_id = country_id
+        try:
+            # Get the country to verify it exists
+            self.country = Country.objects.get(pk=country_id)
+            super().__init__(date_start_str, date_end_str)
+        except Country.DoesNotExist:
+            logger.error(f"Country with ID {country_id} does not exist")
+            raise ValidationError(f"Pays avec l'ID {country_id} introuvable")
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid parameters for CountryPartnerListStatisticsService: {e}")
+            raise ValidationError(f"Paramètres invalides: {e}")
+
+    def _setup_base_filters(self):
+        """
+        Set up base filters with country-specific filtering.
+        Overrides the parent method to add country filter.
+        """
+        try:
+            # Call parent setup first
+            super()._setup_base_filters()
+            
+            # Add country filter to the base querysets
+            self.partners = self.partners.filter(country_id=self.country_id)
+            self.claims = self.claims.filter(partner__country_id=self.country_id)
+            
+            logger.info(f"Country {self.country_id} - Filtered partners: {self.partners.count()}, Claims: {self.claims.count()}")
+            
+        except Exception as e:
+            logger.error(f"Error setting up country partner list base filters: {e}")
+            raise ValidationError(f"Erreur lors de la configuration des filtres: {e}")
+
+    def get_complete_partners_list(self):
+        """
+        Get complete partners list with summary statistics for the country.
+        Extends parent method to add country information.
+        """
+        try:
+            partners_list = self.get_partners_list()
+            summary = self.get_partners_statistics_summary()
+            
+            # Add country information to the summary
+            summary.update({
+                'country': {
+                    'id': self.country.id,
+                    'name': self.country.name,
+                    'code': self.country.code
+                }
+            })
+            
+            return {
+                'partners_list': partners_list,
+                'summary': summary
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating complete country partners list: {e}")
             return {
                 'partners_list': [],
                 'summary': {}
