@@ -7,6 +7,7 @@ from users.permissions import IsSuperUser, IsGlobalAdmin, IsTerritorialAdmin, Is
 from .services.country_statistics import CountryStatisticsService
 from .services.global_statistics import GlobalStatisticsService, CountriesListStatisticsService
 from .services.client_statistics import ClientStatisticsService, ClientStatisticListService
+from .services.policy_statistics import ClientPolicyStatisticsService
 import traceback
 
 import logging
@@ -146,7 +147,7 @@ class CountriesListStatisticsView(APIView):
             print("ERREUR API CountriesListStatisticsView:", str(e))
             traceback.print_exc()
             return Response(
-                {"error": "Une erreur interne s'est produite."},
+                {"error": "Erreur interne du serveur."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -247,3 +248,76 @@ class ClientStatisticListView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+
+
+class ClientPolicyStatisticsView(APIView):
+    """
+    API View for policy statistics using ClientPolicyStatisticsService.
+    Generates comprehensive statistics for a specific policy within a date range.
+    """
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+
+    def post(self, request, policy_id):
+        """
+        Generate comprehensive statistics for a specific policy.
+        
+        Args:
+            request: HTTP request with date_start and date_end
+            policy_id: ID of the policy to analyze
+            
+        Returns:
+            Response: JSON response with all policy statistics
+        """
+        if not request.user.is_active:
+            return Response(
+                {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération. Veuillez contacter votre administrateur hiérarchique."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            # Extract and validate input parameters
+            date_start = request.data.get('date_start')
+            date_end = request.data.get('date_end')
+            
+            if not (date_start and date_end):
+                return Response(
+                    {"error": "date_start et date_end sont requis."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Initialize the service
+            logger.info(f"Generating policy statistics for policy {policy_id} from {date_start} to {date_end}")
+            policy_service = ClientPolicyStatisticsService(policy_id, date_start, date_end)
+            
+            # Check if policy exists
+            if not policy_service.policy:
+                return Response(
+                    {"error": f"Police {policy_id} non trouvée."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Generate statistics
+            statistics_data = policy_service.generate_statistics()
+            
+            if not statistics_data:
+                return Response(
+                    {"error": "Erreur lors de la génération des statistiques de la police."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            
+            logger.info(f"Successfully generated policy statistics for policy {policy_id}")
+            return Response(statistics_data, status=status.HTTP_200_OK)
+            
+        except ValueError as e:
+            logger.error(f"Validation error in policy statistics: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in policy statistics: {e}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {"error": "Erreur interne du serveur."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
