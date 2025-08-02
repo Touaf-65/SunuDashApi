@@ -599,3 +599,276 @@ class ClientPolicyStatisticsService:
             logger.error(f"Error generating policy statistics: {e}")
             return {}
 
+
+
+
+
+class ClientPolicyListStatisticsService:
+    """
+    Service to generate statistics for all policies of a specific client over a given period.
+    """
+    
+    def __init__(self, client_id, date_start_str, date_end_str):
+        """
+        Initialize the service with client ID and date range.
+        
+        Args:
+            client_id (int): ID of the client
+            date_start_str (str): Start date in YYYY-MM-DD format
+            date_end_str (str): End date in YYYY-MM-DD format
+        """
+        try:
+            self.client_id = int(client_id)
+            self.date_start, self.date_end = parse_date_range(date_start_str, date_end_str)
+            self.granularity = get_granularity(self.date_start, self.date_end)
+            self.trunc = get_trunc_function(self.granularity)
+            self._setup_base_filters()
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid parameters for ClientPolicyListStatisticsService: {e}")
+            raise ValidationError(f"Invalid parameters: {e}")
+    
+    def _setup_base_filters(self):
+        """
+        Set up base querysets for client, policies and related data.
+        """
+        try:
+            # Get client
+            self.client = Client.objects.select_related('country').filter(
+                id=self.client_id
+            ).first()
+            
+            if not self.client:
+                logger.warning(f"No client found for client_id: {self.client_id}")
+                raise ValidationError(f"Client with ID {self.client_id} does not exist")
+            
+            # Get all policies for this client
+            self.policies = Policy.objects.select_related('client').filter(
+                client_id=self.client_id
+            )
+            
+            # Get all insured IDs for this client
+            self.insured_ids = list(
+                InsuredEmployer.objects.filter(employer_id=self.client_id)
+                .values_list('insured_id', flat=True)
+            )
+            
+            # Generate periods for time series alignment
+            self.periods = generate_periods(self.date_start, self.date_end, self.granularity)
+            
+            logger.info(f"Client {self.client_id}: {self.policies.count()} policies, {len(self.insured_ids)} insured")
+            
+        except Exception as e:
+            logger.error(f"Error setting up base filters: {e}")
+            raise ValidationError(f"Error setting up filters: {e}")
+    
+    def _get_role_consumption_share(self):
+        """
+        Calculate consumption share by insured role across all policies.
+        
+        Returns:
+            list: Consumption amounts for [primary, spouse, child]
+        """
+        try:
+            claims_by_role = (
+                Claim.objects.filter(
+                    insured_id__in=self.insured_ids,
+                    settlement_date__range=(self.date_start, self.date_end),
+                    invoice__isnull=False
+                )
+                .values('insured__insured_clients__role')
+                .annotate(total=Sum('invoice__reimbursed_amount'))
+            )
+            
+            role_totals = {'primary': 0, 'spouse': 0, 'child': 0}
+            for claim in claims_by_role:
+                role = claim['insured__insured_clients__role']
+                value = sanitize_float(claim['total'] or 0)
+                if role in role_totals:
+                    role_totals[role] = value
+            
+            return [
+                role_totals['primary'],
+                role_totals['spouse'],
+                role_totals['child']
+            ]
+        except Exception as e:
+            logger.error(f"Error in _get_role_consumption_share: {e}")
+            return [0, 0, 0]
+    
+    def _get_policy_consumption_series(self):
+        """
+        Generate consumption time series for each policy.
+        
+        Returns:
+            list: List of series data for each policy
+        """
+        try:
+            policy_consumption_series = []
+            
+            for policy in self.policies:
+                # Get claims data for this policy
+                claims_data = list(
+                    Claim.objects.filter(
+                        policy_id=policy.id,
+                        settlement_date__range=(self.date_start, self.date_end),
+                        invoice__isnull=False
+                    )
+                    .annotate(period=self.trunc('settlement_date'))
+                    .values('period')
+                    .annotate(total=Sum('invoice__reimbursed_amount'))
+                    .order_by('period')
+                )
+                
+                # Create a map for quick lookup
+                claims_map = {c['period']: sanitize_float(c['total'] or 0) for c in claims_data}
+                
+                # Fill all periods with data
+                data = [claims_map.get(period, 0) for period in self.periods]
+                
+                serie = {
+                    "name": policy.policy_number,
+                    "data": data
+                }
+                policy_consumption_series.append(serie)
+            
+            return policy_consumption_series
+        except Exception as e:
+            logger.error(f"Error in _get_policy_consumption_series: {e}")
+            return []
+    
+    def _get_policies_table(self):
+        """
+        Generate table data for all policies.
+        
+        Returns:
+            list: List of policy statistics dictionaries
+        """
+        try:
+            policies_table = []
+            
+            for policy in self.policies:
+                # Get insured links for this policy
+                insured_links = InsuredEmployer.objects.filter(policy_id=policy.id)
+                nb_primary = insured_links.filter(role='primary').count()
+                nb_total = insured_links.count()
+                
+                # Get insured IDs for this policy
+                policy_insured_ids = list(insured_links.values_list('insured_id', flat=True))
+                
+                # Calculate aggregated amounts
+                agg = Claim.objects.filter(
+                    policy_id=policy.id,
+                    insured_id__in=policy_insured_ids,
+                    settlement_date__range=(self.date_start, self.date_end),
+                    invoice__isnull=False
+                ).aggregate(
+                    total_claimed=Sum('invoice__claimed_amount'),
+                    total_reimbursed=Sum('invoice__reimbursed_amount')
+                )
+                
+                policies_table.append({
+                    "policy_id": policy.id,
+                    "policy_number": policy.policy_number,
+                    "nb_primary": nb_primary,
+                    "nb_total": nb_total,
+                    "consumption": sanitize_float(agg['total_reimbursed'] or 0),
+                    "claimed": sanitize_float(agg['total_claimed'] or 0),
+                })
+            
+            return policies_table
+        except Exception as e:
+            logger.error(f"Error in _get_policies_table: {e}")
+            return []
+    
+    def _get_consistency_warning(self, role_consumption_share, policies_table):
+        """
+        Check for consistency between role consumption and policy consumption.
+        
+        Args:
+            role_consumption_share (list): Consumption by role
+            policies_table (list): Policies table data
+            
+        Returns:
+            dict or None: Consistency warning if applicable
+        """
+        try:
+            if len(policies_table) == 1:
+                total_role = sum(role_consumption_share)
+                policy_total = policies_table[0]["consumption"]
+                
+                if abs(total_role - policy_total) > 1e-2:  # floating point tolerance
+                    return {
+                        "sum_role_consumption_share": total_role,
+                        "policy_consumption": policy_total,
+                        "diff": total_role - policy_total,
+                        "message": "Incohérence détectée : la somme des consommations par type ne correspond pas à la consommation totale de la police."
+                    }
+            return None
+        except Exception as e:
+            logger.error(f"Error in _get_consistency_warning: {e}")
+            return None
+    
+    def _get_date_label(self, dt):
+        """
+        Generate date label based on granularity.
+        
+        Args:
+            dt (datetime): Date to format
+            
+        Returns:
+            str: Formatted date label
+        """
+        if self.granularity == 'day':
+            return dt.strftime('%Y-%m-%d')
+        elif self.granularity == 'month':
+            return dt.strftime('%Y-%m')
+        elif self.granularity == 'year':
+            return dt.strftime('%Y')
+        elif self.granularity == 'quarter':
+            quarter = (dt.month - 1) // 3 + 1
+            return f"{dt.year}-Q{quarter}"
+        return str(dt)
+    
+    def get_policies_statistics(self):
+        """
+        Generate comprehensive statistics for all policies of the client.
+        
+        Returns:
+            dict: Complete statistics for client policies
+        """
+        try:
+            # Get role consumption share
+            role_consumption_share = self._get_role_consumption_share()
+            
+            # Get policy consumption series
+            policy_consumption_series = self._get_policy_consumption_series()
+            
+            # Generate period labels for series
+            policy_consumption_series_labels = [self._get_date_label(period) for period in self.periods]
+            
+            # Get policies table
+            policies_table = self._get_policies_table()
+            
+            # Check for consistency warnings
+            consistency_warning = self._get_consistency_warning(role_consumption_share, policies_table)
+            
+            # Compile response data
+            response_data = {
+                "client_id": self.client.id,
+                "client_name": self.client.name,
+                "granularity": self.granularity,
+                "role_consumption_share": role_consumption_share,
+                "policy_consumption_series": policy_consumption_series,
+                "policy_consumption_series_labels": policy_consumption_series_labels,
+                "policies_table": policies_table,
+            }
+            
+            if consistency_warning:
+                response_data["consistency_warning"] = consistency_warning
+            
+            return sanitize_float(response_data)
+            
+        except Exception as e:
+            logger.error(f"Error generating policies statistics: {e}")
+            return {}
+
