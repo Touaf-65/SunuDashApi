@@ -485,7 +485,6 @@ class GlobalStatisticsService:
 
 
 
-
 class CountriesListStatisticsService:
     """
     Service to retrieve country-level statistics, including:

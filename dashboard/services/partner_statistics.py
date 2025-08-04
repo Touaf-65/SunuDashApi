@@ -1,12 +1,12 @@
 from django.db.models import Sum, Count, Q
 from django.core.exceptions import ValidationError
-from core.models import Partner, Claim, Invoice
+from core.models import Partner, Claim, Invoice, InsuredEmployer  
 from countries.models import Country
 from .base import (
     get_granularity, get_trunc_function, parse_date_range,
     generate_periods, fill_full_series, serie_to_pairs,
     compute_evolution_rate, format_series_for_multi_line_chart,
-    sanitize_float
+    sanitize_float, format_top_clients_series
 )
 import logging
 
@@ -629,6 +629,7 @@ class CountryPartnerStatisticsService(PartnerStatisticsService):
             return {}
 
 
+
 class CountryPartnerListStatisticsService(PartnerListStatisticsService):
     """
     Service to retrieve a list of all partners for a specific country, sorted by consumption.
@@ -704,3 +705,608 @@ class CountryPartnerListStatisticsService(PartnerListStatisticsService):
                 'partners_list': [],
                 'summary': {}
             }
+
+
+class ClientPartnerStatisticsService(PartnerStatisticsService):
+    """
+    Service to generate partner statistics for a specific client over a given period.
+    Extends PartnerStatisticsService with client-specific filtering.
+    """
+
+    def __init__(self, client_id, date_start_str, date_end_str):
+        """
+        Initialize the service with client ID and date range.
+        
+        Args:
+            client_id (int): ID of the client to filter partners
+            date_start_str (str): Start date in YYYY-MM-DD format
+            date_end_str (str): End date in YYYY-MM-DD format
+        """
+        self.client_id = client_id
+        try:
+            # Get the client to verify it exists
+            from core.models import Client
+            self.client = Client.objects.get(pk=client_id)
+            super().__init__(date_start_str, date_end_str)
+        except Client.DoesNotExist:
+            logger.error(f"Client with ID {client_id} does not exist")
+            raise ValidationError(f"Client avec l'ID {client_id} introuvable")
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid parameters for ClientPartnerStatisticsService: {e}")
+            raise ValidationError(f"Paramètres invalides: {e}")
+
+    def _setup_base_filters(self):
+        """
+        Set up base filters with client-specific filtering.
+        Overrides the parent method to add client filter.
+        """
+        try:
+            # Call parent setup first
+            super()._setup_base_filters()
+            
+            # Get all insured IDs for this client
+            insured_ids = list(InsuredEmployer.objects.filter(
+                employer_id=self.client_id
+            ).values_list('insured_id', flat=True))
+            
+            if not insured_ids:
+                # No insured members for this client
+                self.claims = self.claims.none()
+            else:
+                # Filter claims by insured members of this client
+                self.claims = self.claims.filter(insured_id__in=insured_ids)
+            
+            logger.info(f"Client {self.client_id} - Filtered claims: {self.claims.count()}")
+            
+        except Exception as e:
+            logger.error(f"Error setting up client partner base filters: {e}")
+            raise ValidationError(f"Erreur lors de la configuration des filtres: {e}")
+
+    def get_complete_statistics(self):
+        """
+        Get complete statistics for partners of the specified client.
+        Extends parent method to add client information.
+        """
+        try:
+            stats = super().get_complete_statistics()
+            
+            # Add client information to the stats
+            stats.update({
+                'client': {
+                    'id': self.client.id,
+                    'name': self.client.name,
+                    'code': getattr(self.client, 'code', None)
+                }
+            })
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error generating client partner statistics: {e}")
+            return {}
+
+
+
+class ClientPartnerListStatisticsService(PartnerListStatisticsService):
+    """
+    Service to retrieve a list of all partners where a client's insured members have consumed,
+    sorted by consumption.
+    Extends PartnerListStatisticsService with client-specific filtering.
+    """
+
+    def __init__(self, client_id, date_start_str, date_end_str):
+        """
+        Initialize the service with client ID and date range.
+        
+        Args:
+            client_id (int): ID of the client to filter partners
+            date_start_str (str): Start date in YYYY-MM-DD format
+            date_end_str (str): End date in YYYY-MM-DD format
+        """
+        self.client_id = client_id
+        try:
+            # Get the client to verify it exists
+            from core.models import Client
+            self.client = Client.objects.get(pk=client_id)
+            super().__init__(date_start_str, date_end_str)
+        except Client.DoesNotExist:
+            logger.error(f"Client with ID {client_id} does not exist")
+            raise ValidationError(f"Client avec l'ID {client_id} introuvable")
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid parameters for ClientPartnerListStatisticsService: {e}")
+            raise ValidationError(f"Paramètres invalides: {e}")
+
+    def _setup_base_filters(self):
+        """
+        Set up base filters with client-specific filtering.
+        Overrides the parent method to add client filter.
+        """
+        try:
+            # Call parent setup first
+            super()._setup_base_filters()
+            
+            # Get all insured IDs for this client
+            insured_ids = list(InsuredEmployer.objects.filter(
+                employer_id=self.client_id
+            ).values_list('insured_id', flat=True))
+            
+            if not insured_ids:
+                # No insured members for this client
+                self.claims = self.claims.none()
+            else:
+                # Filter claims by insured members of this client
+                self.claims = self.claims.filter(
+                    insured_id__in=insured_ids
+                )
+            
+            logger.info(f"Client {self.client_id} - Filtered claims: {self.claims.count()}")
+            
+        except Exception as e:
+            logger.error(f"Error setting up client partner list base filters: {e}")
+            raise ValidationError(f"Erreur lors de la configuration des filtres: {e}")
+
+    def get_complete_partners_list(self):
+        """
+        Get complete partners list with summary statistics for the client.
+        Extends parent method to add client information.
+        """
+        try:
+            partners_list = self.get_partners_list()
+            summary = self.get_partners_statistics_summary()
+            
+            # Add client information to the summary
+            summary.update({
+                'client': {
+                    'id': self.client.id,
+                    'name': self.client.name,
+                    'code': self.client.code if hasattr(self.client, 'code') else None
+                }
+            })
+            
+            return {
+                'partners_list': partners_list,
+                'summary': summary
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating complete client partners list: {e}")
+            return {
+                'partners_list': [],
+                'summary': {}
+            }
+
+
+class PolicyPartnerStatisticsService(PartnerStatisticsService):
+    """
+    Service to generate partner statistics for a specific policy over a given period.
+    Extends PartnerStatisticsService with policy-specific filtering.
+    """
+
+    def __init__(self, policy_id, date_start_str, date_end_str):
+        """
+        Initialize the service with policy ID and date range.
+        
+        Args:
+            policy_id (int): ID of the policy to filter partners
+            date_start_str (str): Start date in YYYY-MM-DD format
+            date_end_str (str): End date in YYYY-MM-DD format
+        """
+        self.policy_id = policy_id
+        try:
+            # Get the policy to verify it exists
+            from core.models import Policy
+            self.policy = Policy.objects.get(pk=policy_id)
+            super().__init__(date_start_str, date_end_str)
+        except Policy.DoesNotExist:
+            logger.error(f"Policy with ID {policy_id} does not exist")
+            raise ValidationError(f"Police avec l'ID {policy_id} introuvable")
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid parameters for PolicyPartnerStatisticsService: {e}")
+            raise ValidationError(f"Paramètres invalides: {e}")
+
+    def _setup_base_filters(self):
+        """
+        Set up base filters with policy-specific filtering.
+        Overrides the parent method to add policy filter.
+        """
+        try:
+            # Call parent setup first
+            super()._setup_base_filters()
+            
+            # Filter claims by this policy
+            self.claims = self.claims.filter(policy_id=self.policy_id)
+            
+            logger.info(f"Policy {self.policy_id} - Filtered claims: {self.claims.count()}")
+            
+        except Exception as e:
+            logger.error(f"Error setting up policy partner base filters: {e}")
+            raise ValidationError(f"Erreur lors de la configuration des filtres: {e}")
+
+    def get_complete_statistics(self):
+        """
+        Get complete statistics for partners of the specified policy.
+        Extends parent method to add policy information.
+        """
+        try:
+            stats = super().get_complete_statistics()
+            
+            # Add policy information to the stats
+            stats.update({
+                'policy': {
+                    'id': self.policy.id,
+                    'number': getattr(self.policy, 'policy_number', None)
+                }
+            })
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error generating policy partner statistics: {e}")
+            return {}
+
+
+class PolicyPartnerListStatisticsService(PartnerListStatisticsService):
+    """
+    Service to retrieve a list of all partners where a policy's insured members have consumed,
+    sorted by consumption.
+    Extends PartnerListStatisticsService with policy-specific filtering.
+    """
+
+    def __init__(self, policy_id, date_start_str, date_end_str):
+        """
+        Initialize the service with policy ID and date range.
+        
+        Args:
+            policy_id (int): ID of the policy to filter partners
+            date_start_str (str): Start date in YYYY-MM-DD format
+            date_end_str (str): End date in YYYY-MM-DD format
+        """
+        self.policy_id = policy_id
+        try:
+            # Get the policy to verify it exists
+            from core.models import Policy
+            self.policy = Policy.objects.get(pk=policy_id)
+            super().__init__(date_start_str, date_end_str)
+        except Policy.DoesNotExist:
+            logger.error(f"Policy with ID {policy_id} does not exist")
+            raise ValidationError(f"Police avec l'ID {policy_id} introuvable")
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid parameters for PolicyPartnerListStatisticsService: {e}")
+            raise ValidationError(f"Paramètres invalides: {e}")
+
+    def _setup_base_filters(self):
+        """
+        Set up base filters with policy-specific filtering.
+        Overrides the parent method to add policy filter.
+        """
+        try:
+            # Call parent setup first
+            super()._setup_base_filters()
+            
+            # Filter claims by this policy
+            self.claims = self.claims.filter(policy_id=self.policy_id)
+            
+            logger.info(f"Policy {self.policy_id} - Filtered claims: {self.claims.count()}")
+            
+        except Exception as e:
+            logger.error(f"Error setting up policy partner list base filters: {e}")
+            raise ValidationError(f"Erreur lors de la configuration des filtres: {e}")
+
+    def get_complete_partners_list(self):
+        """
+        Get complete partners list with summary statistics for the policy.
+        Extends parent method to add policy information.
+        """
+        try:
+            partners_list = self.get_partners_list()
+            summary = self.get_partners_statistics_summary()
+            
+            # Add policy information to the summary
+            summary.update({
+                'policy': {
+                    'id': self.policy.id,
+                    'number': getattr(self.policy, 'policy_number', None)
+                }
+            })
+            
+            return {
+                'partners_list': partners_list,
+                'summary': summary
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating complete policy partners list: {e}")
+            return {
+                'partners_list': [],
+                'summary': {}
+            }
+
+
+
+class PartnerStatisticsService:
+    """
+    Service pour générer les statistiques d'un partenaire unique (prestataire) sur une période donnée.
+    """
+    def __init__(self, partner_id, date_start_str, date_end_str):
+        try:
+            self.partner_id = int(partner_id)
+            self.date_start, self.date_end = parse_date_range(date_start_str, date_end_str)
+            self.granularity = get_granularity(self.date_start, self.date_end)
+            self.trunc = get_trunc_function(self.granularity)
+            self._setup_base_filters()
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid parameters for SinglePartnerStatisticsService: {e}")
+            raise ValidationError(f"Invalid parameters: {e}")
+
+    def _setup_base_filters(self):
+        try:
+            from core.models import Client, Insured, InsuredEmployer
+            self.partner = Partner.objects.filter(id=self.partner_id).first()
+            if not self.partner:
+                raise ValidationError(f"Partner with ID {self.partner_id} does not exist")
+            # Claims liés à ce partenaire
+            self.claims = Claim.objects.select_related(
+                'invoice', 'policy__client', 'insured', 'partner'
+            ).filter(
+                partner_id=self.partner_id,
+                settlement_date__range=(self.date_start, self.date_end),
+                invoice__isnull=False
+            )
+            # Invoices liées à ce partenaire
+            self.invoices = Invoice.objects.filter(
+                provider_id=self.partner_id,
+                creation_date__range=(self.date_start, self.date_end)
+            )
+            # Clients ayant eu des consommations chez ce partenaire
+            self.client_ids = self.claims.values_list('policy__client_id', flat=True).distinct()
+            self.clients = Client.objects.filter(id__in=self.client_ids)
+            # Assurés ayant consommé chez ce partenaire
+            self.insured_ids = self.claims.values_list('insured_id', flat=True).distinct()
+            self.insureds = Insured.objects.filter(id__in=self.insured_ids)
+        except Exception as e:
+            logger.error(f"Error setting up base filters: {e}")
+            raise ValidationError(f"Error setting up filters: {e}")
+
+    def get_clients_evolution(self):
+        """
+        Évolution du nombre de clients ayant consommé chez ce partenaire.
+        """
+        try:
+            result = list(
+                self.claims.annotate(period=self.trunc('settlement_date'))
+                .values('period')
+                .annotate(value=Count('policy__client', distinct=True))
+                .order_by('period')
+            )
+            for point in result:
+                point['value'] = int(point['value'] or 0)
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_clients_evolution: {e}")
+            return []
+
+    def get_consuming_insured_evolution(self):
+        """
+        Évolution du nombre d'assurés ayant consommé chez ce partenaire.
+        """
+        try:
+            result = list(
+                self.claims.annotate(period=self.trunc('settlement_date'))
+                .values('period')
+                .annotate(value=Count('insured_id', distinct=True))
+                .order_by('period')
+            )
+            for point in result:
+                point['value'] = int(point['value'] or 0)
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_consuming_insured_evolution: {e}")
+            return []
+
+    def get_reimbursed_amount_evolution(self):
+        """
+        Évolution du montant remboursé par ce partenaire.
+        """
+        try:
+            result = list(
+                self.claims.annotate(period=self.trunc('settlement_date'))
+                .values('period')
+                .annotate(value=Sum('invoice__reimbursed_amount'))
+                .order_by('period')
+            )
+            for point in result:
+                point['value'] = float(point['value'] or 0)
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_reimbursed_amount_evolution: {e}")
+            return []
+
+    def get_claimed_amount_evolution(self):
+        """
+        Évolution du montant réclamé par ce partenaire.
+        """
+        try:
+            result = list(
+                self.claims.annotate(period=self.trunc('settlement_date'))
+                .values('period')
+                .annotate(value=Sum('invoice__claimed_amount'))
+                .order_by('period')
+            )
+            for point in result:
+                point['value'] = float(point['value'] or 0)
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_claimed_amount_evolution: {e}")
+            return []
+
+    def get_consumption_by_role_timeseries(self):
+        """
+        Part de consommation par type d'assurés (principal, spouse, child, other).
+        Retourne un dict {role: [ {period, value}, ... ] }
+        """
+        try:
+            roles = ['primary', 'spouse', 'child']
+            consumption_by_role = {}
+            for role in roles:
+                claims_role = self.claims.filter(insured__insured_clients__role=role)
+                result = list(
+                    claims_role.annotate(period=self.trunc('settlement_date'))
+                    .values('period')
+                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .order_by('period')
+                )
+                for point in result:
+                    point['value'] = float(point['value'] or 0)
+                consumption_by_role[role] = result
+            return consumption_by_role
+        except Exception as e:
+            logger.error(f"Error in get_consumption_by_role_timeseries: {e}")
+            return {}
+
+    def get_top_clients_consumption_series(self, limit=10):
+        """
+        Multi-line chart pour l'évolution des consommations des 10 clients dont les assurés ont le plus consommé chez ce partenaire.
+        Retourne (series, categories) pour ApexCharts.
+        """
+        try:
+            # Top clients par consommation totale
+            top_clients = list(
+                self.claims.values('policy__client_id')
+                .annotate(total_consumption=Sum('invoice__reimbursed_amount'))
+                .order_by('-total_consumption')[:limit]
+            )
+            top_client_ids = [c['policy__client_id'] for c in top_clients]
+            client_names = {c.id: c.name for c in self.clients.filter(id__in=top_client_ids)}
+            # Générer la série temporelle pour chaque client
+            top_clients_series = []
+            for client_id in top_client_ids:
+                client_claims = self.claims.filter(policy__client_id=client_id)
+                client_series = list(
+                    client_claims.annotate(period=self.trunc('settlement_date'))
+                    .values('period')
+                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .order_by('period')
+                )
+                for point in client_series:
+                    point['value'] = float(point['value'] or 0)
+                top_clients_series.append({
+                    'client_id': client_id,
+                    'client_name': client_names.get(client_id, str(client_id)),
+                    'series': client_series
+                })
+            # Format pour ApexCharts
+            periods = generate_periods(self.date_start, self.date_end, self.granularity)
+            series_multi, categories = format_top_clients_series(top_clients_series, periods, self.granularity)
+            return series_multi, categories
+        except Exception as e:
+            logger.error(f"Error in get_top_clients_consumption_series: {e}")
+            return [], []
+
+    def get_acts_count_evolution(self):
+        """
+        Évolution du nombre de prestations (acts) réalisées chez ce partenaire.
+        """
+        try:
+            result = list(
+                self.claims.annotate(period=self.trunc('settlement_date'))
+                .values('period')
+                .annotate(value=Count('act_id'))
+                .order_by('period')
+            )
+            for point in result:
+                point['value'] = int(point['value'] or 0)
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_acts_count_evolution: {e}")
+            return []
+
+    def _calculate_actual_values(self, clients_series, insured_series, reimbursed_series, claimed_series, acts_series):
+        def safe_last(series):
+            if not series:
+                return 0
+            return series[-1]['value'] if isinstance(series[-1], dict) else series[-1][1]
+        return {
+            'actual_clients_count': safe_last(clients_series),
+            'actual_insured_count': safe_last(insured_series),
+            'actual_reimbursed_amount': safe_last(reimbursed_series),
+            'actual_claimed_amount': safe_last(claimed_series),
+            'actual_acts_count': safe_last(acts_series),
+        }
+
+    def _calculate_evolution_rates(self, clients_series, insured_series, reimbursed_series, claimed_series, acts_series):
+        def safe_rate(series):
+            if not series or len(series) < 2:
+                return 0.0
+            v0 = series[0]['value'] if isinstance(series[0], dict) else series[0][1]
+            v1 = series[-1]['value'] if isinstance(series[-1], dict) else series[-1][1]
+            v0 = 0 if v0 is None else v0
+            v1 = 0 if v1 is None else v1
+            if v0 == 0:
+                return float('inf') if v1 != 0 else 0.0
+            return round((v1 - v0) / v0, 4) 
+        return {
+            'clients_evolution_rate': safe_rate(clients_series),
+            'insured_evolution_rate': safe_rate(insured_series),
+            'reimbursed_evolution_rate': safe_rate(reimbursed_series),
+            'claimed_evolution_rate': safe_rate(claimed_series),
+            'acts_evolution_rate': safe_rate(acts_series),
+        }
+
+    def get_complete_statistics(self):
+        """
+        Agrège toutes les statistiques pour le partenaire unique.
+        """
+        try:
+            clients_evolution = self.get_clients_evolution()
+            insured_evolution = self.get_consuming_insured_evolution()
+            reimbursed_evolution = self.get_reimbursed_amount_evolution()
+            claimed_evolution = self.get_claimed_amount_evolution()
+            acts_count_evolution = self.get_acts_count_evolution()
+            consumption_by_role = self.get_consumption_by_role_timeseries()
+            top_clients_series, top_clients_categories = self.get_top_clients_consumption_series(10)
+            periods = generate_periods(self.date_start, self.date_end, self.granularity)
+            # Compléter les séries pour tous les points de la période
+            clients_evolution_full = fill_full_series(periods, clients_evolution)
+            insured_evolution_full = fill_full_series(periods, insured_evolution)
+            reimbursed_evolution_full = fill_full_series(periods, reimbursed_evolution)
+            claimed_evolution_full = fill_full_series(periods, claimed_evolution)
+            acts_count_evolution_full = fill_full_series(periods, acts_count_evolution)
+            # Format multi-line chart pour la consommation par type d'assuré
+            role_labels = {
+                'primary': 'Assuré principal',
+                'spouse': 'Conjoint(e)',
+                'child': 'Enfant',
+            }
+            consumption_by_role_series = format_series_for_multi_line_chart(
+                consumption_by_role, periods, self.granularity, role_labels
+            )
+            actual_values = self._calculate_actual_values(
+                clients_evolution_full, insured_evolution_full, reimbursed_evolution_full, claimed_evolution_full, acts_count_evolution_full
+            )
+            evolution_rates = self._calculate_evolution_rates(
+                clients_evolution_full, insured_evolution_full, reimbursed_evolution_full, claimed_evolution_full, acts_count_evolution_full
+            )
+            return sanitize_float({
+                'granularity': self.granularity,
+                'clients_evolution': serie_to_pairs(clients_evolution_full),
+                'insured_evolution': serie_to_pairs(insured_evolution_full),
+                'reimbursed_amount_evolution': serie_to_pairs(reimbursed_evolution_full),
+                'claimed_amount_evolution': serie_to_pairs(claimed_evolution_full),
+                'acts_count_evolution': serie_to_pairs(acts_count_evolution_full),
+                'consumption_by_role_series': consumption_by_role_series,
+                'top_clients_consumption_series': top_clients_series,
+                'top_clients_consumption_categories': top_clients_categories,
+                **actual_values,
+                **evolution_rates,
+                'partner': {
+                    'id': self.partner.id,
+                    'name': self.partner.name
+                },
+                'date_start': self.date_start.isoformat(),
+                'date_end': self.date_end.isoformat(),
+            })
+        except Exception as e:
+            logger.error(f"Error in get_complete_statistics: {e}")
+            return {}
+
+

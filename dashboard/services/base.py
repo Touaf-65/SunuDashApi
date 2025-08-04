@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, date
 from dateutil.relativedelta import relativedelta
 from django.db.models.functions import TruncDay, TruncMonth, TruncQuarter, TruncYear
 import pytz
+import math
 
 tz = pytz.UTC
 
@@ -26,6 +27,22 @@ def get_granularity(date_start, date_end):
         return 'quarter'
     else:
         return 'year'
+
+
+
+def sanitize_float(value):
+    """Sanitize float values to ensure JSON serialization compatibility."""
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return 0.0  # Replace NaN/inf with 0
+        return round(value, 2)  # Round to 2 decimal places
+    elif isinstance(value, dict):
+        return {key: sanitize_float(val) for key, val in value.items()}
+    elif isinstance(value, list):
+        return [sanitize_float(val) for val in value]
+    else:
+        return value
+
 
 
 def get_trunc_function(granularity):
@@ -303,3 +320,58 @@ def format_top_clients_series(top_clients_data, periods, granularity):
     categories = [date_label(p, granularity) for p in period_dates]
     
     return series_multi, categories
+
+
+def format_top_insureds_series(top_insureds_data, periods, granularity):
+    """
+    Formats top insureds' data for ApexCharts.
+    
+    Args:
+        top_insureds_data (list): Top insureds data
+        periods (list): List of periods
+        granularity (str): Temporal granularity
+        
+    Returns:
+        tuple: (series_multi, categories)
+    """
+    period_dates = [to_date(p) for p in periods]
+    series_multi = []
+    
+    for top in top_insureds_data:
+        name = top.get("insured_name") or str(top.get("insured_id"))
+        value_map = {to_date(point['period']): float(point['value'] or 0) 
+                    for point in top["series"]}
+        data = [value_map.get(p, 0) for p in period_dates]
+        series_multi.append({"name": name, "data": data})
+    
+    categories = [date_label(p, granularity) for p in period_dates]
+    
+    return series_multi, categories
+
+
+def format_countries_consumption_series(countries_data, periods, granularity):
+    """
+    Formats countries' consumption data for ApexCharts multi-line chart.
+
+    Args:
+        countries_data (list): List of dicts with country consumption series
+        periods (list): List of periods
+        granularity (str): Temporal granularity
+
+    Returns:
+        tuple: (series_multi, categories)
+    """
+    period_dates = [to_date(p) for p in periods]
+    series_multi = []
+
+    for country in countries_data:
+        name = country.get("country_name") or str(country.get("country_id"))
+        value_map = {to_date(point['period']): float(point['value'] or 0)
+                     for point in country["series"]}
+        data = [value_map.get(p, 0) for p in period_dates]
+        series_multi.append({"name": name, "data": data})
+
+    categories = [date_label(p, granularity) for p in period_dates]
+
+    return series_multi, categories
+

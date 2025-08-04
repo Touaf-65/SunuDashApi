@@ -9,7 +9,9 @@ from .services.global_statistics import GlobalStatisticsService, CountriesListSt
 from .services.client_statistics import ClientStatisticsService, ClientStatisticListService
 from .services.policy_statistics import ClientPolicyStatisticsService, ClientPolicyListStatisticsService
 from .services.partner_statistics import (PartnerStatisticsService, PartnerListStatisticsService, CountryPartnerStatisticsService,
-CountryPartnerListStatisticsService)
+CountryPartnerListStatisticsService, ClientPartnerStatisticsService, ClientPartnerListStatisticsService, PolicyPartnerStatisticsService,
+)
+from .services.insured_statistics import CountryInsuredStatisticsService, CountryInsuredListService
 import traceback
 
 import logging
@@ -251,7 +253,6 @@ class ClientStatisticListView(APIView):
             )
 
 
-
 class ClientPolicyStatisticsView(APIView):
     """
     API View for policy statistics using ClientPolicyStatisticsService.
@@ -323,7 +324,6 @@ class ClientPolicyStatisticsView(APIView):
                 {"error": "Erreur interne du serveur."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
 
 
 class ClientPolicyListStatisticsView(APIView):
@@ -631,3 +631,413 @@ class CountryPartnerListStatisticsView(APIView):
                 {"error": "Erreur interne du serveur."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class ClientPartnerStatisticsView(APIView):
+    """
+    API view to get partner statistics for a specific client.
+    """
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    
+    def post(self, request, client_id):
+        """
+        Generate partner statistics for a specific client.
+        
+        Request body:
+            date_start (str): Start date in YYYY-MM-DD format
+            date_end (str): End date in YYYY-MM-DD format
+            
+        Returns:
+            Response: JSON response with partner statistics for the client
+        """
+        try:
+            # Extract and validate request data
+            date_start = request.data.get('date_start')
+            date_end = request.data.get('date_end')
+            
+            if not date_start or not date_end:
+                return Response(
+                    {"error": "date_start et date_end sont requis."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Initialize and use the service
+            service = ClientPartnerStatisticsService(
+                client_id=client_id,
+                date_start_str=date_start,
+                date_end_str=date_end
+            )
+            
+            # Generate statistics
+            stats = service.get_complete_statistics()
+            
+            return Response(stats, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in client partner statistics: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except ValueError as e:
+            logger.error(f"Value error in client partner statistics: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in client partner statistics: {e}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {"error": "Erreur interne du serveur."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class ClientPartnerListStatisticsView(APIView):
+    """
+    API view to get a list of all partners where a client's insured members have consumed,
+    sorted by consumption.
+    """
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    
+    def post(self, request, client_id):
+        """
+        Get list of all partners where the client's insured members have consumed.
+        
+        Request body:
+            date_start (str): Start date in YYYY-MM-DD format
+            date_end (str): End date in YYYY-MM-DD format
+            
+        Returns:
+            Response: JSON response with partners list and summary
+        """
+        try:
+            # Extract and validate request data
+            date_start = request.data.get('date_start')
+            date_end = request.data.get('date_end')
+            
+            if not date_start or not date_end:
+                return Response(
+                    {"error": "date_start et date_end sont requis."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Initialize and use the service
+            service = ClientPartnerListStatisticsService(
+                client_id=client_id,
+                date_start_str=date_start,
+                date_end_str=date_end
+            )
+            
+            # Generate partners list
+            partners_data = service.get_complete_partners_list()
+            
+            return Response(partners_data, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in client partner list: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except ValueError as e:
+            logger.error(f"Value error in client partner list: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in client partner list: {e}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {"error": "Erreur interne du serveur."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class PolicyPartnerStatisticsView(APIView):
+    """
+    API view to get partner statistics for a specific policy.
+    """
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    
+    def post(self, request, policy_id):
+        """
+        Generate partner statistics for a specific policy.
+        
+        Request body:
+            date_start (str): Start date in YYYY-MM-DD format
+            date_end (str): End date in YYYY-MM-DD format
+            
+        Returns:
+            Response: JSON response with partner statistics for the policy
+        """
+        try:
+            # Extract and validate request data
+            date_start = request.data.get('date_start')
+            date_end = request.data.get('date_end')
+            
+            if not date_start or not date_end:
+                return Response(
+                    {"error": "date_start et date_end sont requis."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Initialize and use the service
+            service = PolicyPartnerStatisticsService(
+                policy_id=policy_id,
+                date_start_str=date_start,
+                date_end_str=date_end
+            )
+            
+            # Generate statistics
+            stats = service.get_complete_statistics()
+            
+            return Response(stats, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in policy partner statistics: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except ValueError as e:
+            logger.error(f"Value error in policy partner statistics: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in policy partner statistics: {e}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {"error": "Erreur interne du serveur."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class PolicyPartnerListStatisticsView(APIView):
+    """
+    API view to get a list of all partners where a policy's insured members have consumed,
+    sorted by consumption.
+    """
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    
+    def post(self, request, policy_id):
+        """
+        Get list of all partners where the policy's insured members have consumed.
+        
+        Request body:
+            date_start (str): Start date in YYYY-MM-DD format
+            date_end (str): End date in YYYY-MM-DD format
+            
+        Returns:
+            Response: JSON response with partners list and summary
+        """
+        try:
+            # Extract and validate request data
+            date_start = request.data.get('date_start')
+            date_end = request.data.get('date_end')
+            
+            if not date_start or not date_end:
+                return Response(
+                    {"error": "date_start et date_end sont requis."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Initialize and use the service
+            service = PolicyPartnerListStatisticsService(
+                policy_id=policy_id,
+                date_start_str=date_start,
+                date_end_str=date_end
+            )
+            
+            # Generate partners list
+            partners_data = service.get_complete_partners_list()
+            
+            return Response(partners_data, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in policy partner list: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except ValueError as e:
+            logger.error(f"Value error in policy partner list: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in policy partner list: {e}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {"error": "Erreur interne du serveur."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+
+
+class PartnerStatisticsView(APIView):
+    """
+    API View for client statistics using ClientStatisticsService.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, partner_id):
+        """
+        Generate comprehensive statistics for a specific client.
+        
+        Args:
+            request: HTTP request with date_start and date_end
+            client_id: ID of the client
+            
+        Returns:
+            Response: JSON response with all client statistics
+        """
+        user = request.user
+        date_start = request.data.get('date_start')
+        date_end = request.data.get('date_end')
+        
+        if not request.user.is_active:
+            return Response(
+                {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération. Veuillez contacter votre administrateur hiérarchique."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if not (date_start and date_end):
+            return Response(
+                {"error": "date_start et date_end sont requis."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            service = PartnerStatisticsService(partner_id, date_start, date_end)
+            
+            statistics = service.get_complete_statistics()
+            
+            return Response(statistics, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in PartnerStatisticsView: {e}")
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in PartnerStatisticsView: {e}")
+            return Response(
+                {"error": "Une erreur inattendue s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+
+
+class CountryInsuredStatisticsView(APIView):
+    permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
+
+    def post(self, request):
+    
+        user = request.user
+        date_start = request.data.get('date_start')
+        date_end = request.data.get('date_end')
+        country_id = request.data.get('country_id')
+        
+        if not request.user.is_active:
+            return Response(
+                {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération. Veuillez contacter votre administrateur hiérarchique."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if not (date_start and date_end):
+            return Response(
+                {"error": "date_start et date_end sont requis."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            service = CountryInsuredStatisticsService(country_id, date_start, date_end)
+            
+            statistics = service.get_complete_statistics()
+            
+            return Response(statistics, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in ClientStatisticView: {e}")
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in ClientStatisticView: {e}")
+            return Response(
+                {"error": "Une erreur inattendue s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+
+class CountryInsuredListStatisticsView(APIView):
+    """
+    API view to get a list of all partners where a policy's insured members have consumed,
+    sorted by consumption.
+    """
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    
+    def post(self, request):
+        """
+        Get list of all partners where the policy's insured members have consumed.
+        
+        Request body:
+            date_start (str): Start date in YYYY-MM-DD format
+            date_end (str): End date in YYYY-MM-DD format
+            
+        Returns:
+            Response: JSON response with partners list and summary
+        """
+        try:
+            # Extract and validate request data
+            date_start = request.data.get('date_start')
+            date_end = request.data.get('date_end')
+            country_id = request.data.get('country_id')
+
+            if not date_start or not date_end:
+                return Response(
+                    {"error": "date_start et date_end sont requis."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Initialize and use the service
+            service = CountryInsuredListService(
+                country_id=country_id
+            )
+            
+            # Generate partners list
+            insureds_data = service.get_complete_insureds_list()
+            
+            return Response(insureds_data, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in policy partner list: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except ValueError as e:
+            logger.error(f"Value error in policy partner list: {e}")
+            return Response(
+                {"error": f"Erreur de validation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in policy partner list: {e}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {"error": "Erreur interne du serveur."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
