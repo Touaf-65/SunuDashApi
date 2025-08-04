@@ -85,7 +85,12 @@ class ImporterService:
         self.cleaned_recap = cleaner.clean_recap_dataframe(self.df_recap)
 
         self.cleaned_stat = convert_dates_datetime(self.cleaned_stat, 'payment_date')
-        self.cleaned_recap = convert_dates_datetime(self.cleaned_recap, 'payment_date')
+        print(f"###IMPORTER### TYPE DE LA COLONNE payment_date AVANT CONVERSION: {self.cleaned_recap['payment_date'].dtype}")
+        
+        # print(f"### PAYMENT DATE: {self.cleaned_recap['payment_date'].head()}")
+        self.cleaned_recap = convert_dates_datetime(self.cleaned_recap, 'payment_date', format='%d-%m-%Y')
+        print(f"###IMPORTER### TYPE DE LA COLONNE payment_date APRES CONVERSION: {self.cleaned_recap['payment_date'].dtype}")
+
     
     def get_common_range(self):
         comparator = ComparisonService()

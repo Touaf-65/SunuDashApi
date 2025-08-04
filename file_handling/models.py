@@ -2,6 +2,7 @@ import os
 from django.db import models
 from django.contrib.auth import get_user_model
 from countries.models import Country
+from django.conf import settings
 
 User = get_user_model()
 
@@ -25,9 +26,9 @@ class File(models.Model):
     # import_session = models.ForeignKey('ImportSession', on_delete=models.CASCADE, null=True, blank=True)
 
     def save(self, *args, **kwargs):
-        if not self.file_name:
+        if not self.name:
             filename = os.path.splitext(self.file.name)[0]
-            self.file_name = filename
+            self.name = filename
         
         if not self.country and self.user and hasattr(self.user, 'country'):
             self.country = self.user.country
@@ -116,3 +117,5 @@ class ImportSession(models.Model):
         
     def __str__(self):
         return f"ImportSession {self.pk} ({self.country.name}) - {self.status}"
+
+

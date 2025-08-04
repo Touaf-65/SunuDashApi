@@ -144,6 +144,39 @@ def replace_invalid_numeric_values(df, column, replacement_value=0):
     else:
         raise KeyError(f"La colonne '{column}' n'existe pas dans le DataFrame.")
 
+def export_invalid_date_rows(df: pd.DataFrame, col: str, output_dir: str = 'downloads', filename_prefix: str = 'invalid_dates') -> str:
+    """
+    Exports rows with invalid or non-convertible dates in the specified column to an Excel file,
+    and returns a DataFrame with only valid date rows.
+
+    Args:
+        df (pd.DataFrame): The DataFrame to process.
+        col (str): The name of the date column to check.
+        output_dir (str): Directory where the Excel file will be saved.
+        filename_prefix (str): Prefix for the output file name.
+
+    Returns:
+        valid_df (pd.DataFrame): DataFrame with only valid date rows.
+    """
+    df = df.copy()
+    # Replace common invalid date values with NaN
+    df[col] = df[col].replace(['', ' ', 'N/A', 'NA', '--', '-', '.', None], pd.NA)
+    # Try to convert to datetime
+    converted_dates = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
+    invalid_rows = df[converted_dates.isna()]
+    valid_rows = df[~converted_dates.isna()].copy()
+    # Assign the converted dates to the valid rows
+    valid_rows[col] = pd.to_datetime(valid_rows[col], errors='coerce', dayfirst=True)
+
+    file_path = None
+    if not invalid_rows.empty:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        file_name = f"{filename_prefix}_{col}_{timestamp}.xlsx"
+        os.makedirs(output_dir, exist_ok=True)
+        file_path = os.path.join(output_dir, file_name)
+        invalid_rows.to_excel(file_path, index=False)
+
+    return valid_rows
 
 
 def convert_dates_datetime(df, column, format=None):
@@ -179,6 +212,14 @@ def convert_dates_datetime(df, column, format=None):
                 unit='D', 
                 dayfirst=True
             )
+        # Check if conversion succeeded
+        if not pd.api.types.is_datetime64_any_dtype(df[column]):
+            # Print problematic values for debugging
+            invalid = df[df[column].isna()]
+            print(f"###IMPORTER### Problèmes de conversion pour la colonne '{column}':")
+            print(invalid.head(10))
+            raise TypeError(f"La colonne '{column}' n'est pas de type datetime.")
+
         return df
     else:
         raise KeyError(f"La colonne '{column}' n'existe pas dans le DataFrame.")
@@ -202,6 +243,7 @@ def get_date_range(df, column):
     if df[column].dtype == 'datetime64[ns]':
         return (df[column].min(), df[column].max())
     else:
+        print(f"###### TYPE DE LA COLONNE {column} : {df[column].dtype}")
         raise TypeError(f"La colonne '{column}' n'est pas de type datetime.")
 
 

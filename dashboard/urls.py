@@ -2,7 +2,8 @@ from django.urls import path
 from .views import (CountryStatisticsDetailView, GlobalStatisticsDetailView, CountriesListStatisticsView, ClientStatisticView,
  ClientStatisticListView, ClientPolicyStatisticsView, ClientPolicyListStatisticsView, PartnerStatisticsView, PartnerListStatisticsView,
  CountryPartnerStatisticsView, CountryPartnerListStatisticsView, ClientPartnerStatisticsView, ClientPartnerListStatisticsView,
- PolicyPartnerStatisticsView, PolicyPartnerListStatisticsView, PartnerStatisticsView, CountryInsuredStatisticsView, CountryInsuredListStatisticsView
+ PolicyPartnerStatisticsView, PolicyPartnerListStatisticsView, PartnerStatisticsView, CountryInsuredStatisticsView, CountryInsuredListStatisticsView,
+ CountryFamilyStatisticsView
 )
 
 urlpatterns = [
@@ -24,4 +25,5 @@ urlpatterns = [
     path('partners/<int:partner_id>/statistics/', PartnerStatisticsView.as_view(), name='partner-statistics-detail'),
     path('countries/insureds/statistics/', CountryInsuredStatisticsView.as_view(), name='country-insured-statistics-detail'),
     path('countries/insureds/list/', CountryInsuredListStatisticsView.as_view(), name='country-insured-list-statistics-detail'),
+    path('countries/families/statistics/', CountryFamilyStatisticsView.as_view(), name='country-family-statistics-detail'),
 ]

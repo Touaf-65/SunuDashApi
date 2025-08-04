@@ -131,7 +131,7 @@ class DataMapper:
             for index, row in df_primary.iterrows():
                 try:
                     name = row["beneficiary_name"]
-                    insured = self.get_or_create_primary_insured(name, row["insured_status"])
+                    insured = self.get_or_create_primary_insured(name, row["insured_status"], row["incident_date"])
                     
                     if insured:
                         insured_dict[name.strip()] = insured
@@ -180,7 +180,7 @@ class DataMapper:
                             line_index=index
                         )
                         
-                        primary_insured = self.get_or_create_primary_insured(name_primary, "A")
+                        primary_insured = self.get_or_create_primary_insured(name_primary, "A", row["incident_date"])
                         if primary_insured:
                             insured_dict[name_primary.strip()] = primary_insured
                             insured_created += 1
@@ -188,7 +188,7 @@ class DataMapper:
                     name = row["beneficiary_name"]
                     statut = row["insured_status"]
                     principal_name = row["main_insured"]
-                    insured = self.get_or_create_dependent_insured(name, statut, principal_name, insured_dict)
+                    insured = self.get_or_create_dependent_insured(name, statut, principal_name, insured_dict, row["incident_date"])
                     
                     if insured:
                         insured_dict[name.strip()] = insured
@@ -250,7 +250,8 @@ class DataMapper:
                         policy=policy,
                         status=row["insured_status"],
                         insured_dict=insured_dict,
-                        main_insured_name=row.get("main_insured", "")
+                        main_insured_name=row.get("main_insured", ""),
+                        date=make_aware(row["incident_date"])
                     )
                     
                     if insured_employer:
@@ -409,7 +410,7 @@ class DataMapper:
 
 
 
-    def get_or_create_insured_employer(self, insured, employer, policy, status, insured_dict, main_insured_name):
+    def get_or_create_insured_employer(self, insured, employer, policy, status, insured_dict, main_insured_name, date):
         """
         Crée ou récupère une relation InsuredEmployer.
         
@@ -450,7 +451,8 @@ class DataMapper:
                     primary_insured_ref=primary_insured_ref,
                     file=self.file,
                     import_session=self.import_session
-                )
+                ),
+                creation_date=make_aware(date),
             )
             
             if created:
@@ -564,7 +566,7 @@ class DataMapper:
         if not country:
             raise ValueError(
                 f"Impossible de déterminer le pays pour le partenaire '{name}'. "
-                f"Ni '{country_name}' ni le pays de l'utilisateur ({getattr(user, 'username', user)}) n'existent."
+                f"Ni '{country_name}' ni le pays de l'utilisateur ({getattr(self.user, 'username', self.user)}) n'existent."
             )
 
         return Partner.objects.get_or_create(name=name.strip().upper(), country=country)[0]
@@ -659,7 +661,7 @@ class DataMapper:
         return Operator.objects.get_or_create(name=name.strip().upper(), country=self.country)[0]
 
 
-    def get_or_create_primary_insured(self, name, statut):
+    def get_or_create_primary_insured(self, name, statut, date):
         
         """
         Retrieves or creates a primary insured based on the given name and status.
@@ -680,13 +682,14 @@ class DataMapper:
                 is_primary_insured=True,
                 is_spouse=False,
                 is_child=False,
+                creation_date=make_aware(date),
                 primary_insured=None,
                 file=self.file
             )
         )
         return insured
     
-    def get_or_create_dependent_insured(self, name, statut, principal_name, insured_dict):
+    def get_or_create_dependent_insured(self, name, statut, principal_name, insured_dict, date):
 
         """
         Retrieves or creates a dependent insured based on the given name and status.
@@ -721,7 +724,8 @@ class DataMapper:
                 is_child=is_child,
                 primary_insured=primary_insured,
                 file=self.file
-            )
+            ),
+            creation_date=make_aware(date)
         )
         return insured
 

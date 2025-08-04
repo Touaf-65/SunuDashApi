@@ -11,7 +11,7 @@ from .services.policy_statistics import ClientPolicyStatisticsService, ClientPol
 from .services.partner_statistics import (PartnerStatisticsService, PartnerListStatisticsService, CountryPartnerStatisticsService,
 CountryPartnerListStatisticsService, ClientPartnerStatisticsService, ClientPartnerListStatisticsService, PolicyPartnerStatisticsService,
 )
-from .services.insured_statistics import CountryInsuredStatisticsService, CountryInsuredListService
+from .services.insured_statistics import CountryInsuredStatisticsService, CountryInsuredListService, CountryFamilyStatisticsService 
 import traceback
 
 import logging
@@ -72,7 +72,7 @@ class GlobalStatisticsDetailView(APIView):
     Vue pour récupérer les séries temporelles statistiques d'un pays donné sur une période.
     Utilise le service CountryStatisticsService pour la logique métier.
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin, IsTerritorialAdmin, IsChefDeptTech]
+    permission_classes = [IsAuthenticated, IsGlobalAdmin]
 
     def post(self, request):
         """
@@ -1041,3 +1041,41 @@ class CountryInsuredListStatisticsView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+
+class CountryFamilyStatisticsView(APIView):
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+
+    def post(self, request):
+        user = request.user
+        date_start = request.data.get('date_start')
+        date_end = request.data.get('date_end')
+        country_id = request.data.get('country_id')
+
+        if not request.user.is_active:
+            return Response(
+                {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération. Veuillez contacter votre administrateur hiérarchique."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+            
+        if not (date_start and date_end):
+            return Response(
+                {"error": "date_start et date_end sont requis."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        try:
+            service = CountryFamilyStatisticsService(country_id, date_start, date_end)
+            statistics = service.get_complete_statistics()
+            return Response(statistics, status=status.HTTP_200_OK)
+        except ValidationError as e:
+            logger.error(f"Validation error in CountryFamilyStatisticsView: {e}")
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:      
+            logger.error(f"Unexpected error in CountryFamilyStatisticsView: {e}")
+            return Response(
+                {"error": "Une erreur inattendue s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

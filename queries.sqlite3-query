@@ -1,7 +1,7 @@
 -- database: ./db.sqlite3
 
-DELETE FROM core_actfamily;
 DELETE FROM core_actcategory;
+DELETE FROM core_actfamily;
 
 DELETE FROM core_act;
 DELETE FROM core_partner;
@@ -10,5 +10,15 @@ DELETE FROM core_operator;
 DELETE FROM core_client;
 DELETE FROM core_policy;
 DELETE FROM core_insured;
+DELETE FROM core_insuredemployer;
 DELETE FROM core_invoice;
 DELETE FROM core_claim;
+
+select client_id from core_policy
+where id = 400;
+
+select * from core_insuredemployer
+where policy_id = 400;
+
+select * from core_claim
+where insured_id = 5502;

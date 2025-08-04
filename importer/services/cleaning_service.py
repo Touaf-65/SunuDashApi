@@ -1,4 +1,6 @@
-from importer.utils.functions import normalize_columns, replace_invalid_numeric_values, clean_text_columns, convert_dates_datetime, convert_df_to_upper
+from importer.utils.functions import (normalize_columns, replace_invalid_numeric_values, 
+clean_text_columns, convert_dates_datetime, convert_df_to_upper, export_invalid_date_rows
+)
 import pandas as pd
 
 class CleaningService:
@@ -31,6 +33,8 @@ class CleaningService:
                 replace_invalid_numeric_values(df, col)
 
         df = convert_df_to_upper(df)
+
+        df = export_invalid_date_rows(df, 'payment_date', filename_prefix='recap_invalid_dates')
 
         if 'payment_date' in df.columns:
             df = convert_dates_datetime(df, 'payment_date', format='%d-%m-%Y')
@@ -81,10 +85,9 @@ class CleaningService:
 
         df = clean_text_columns(df)
 
-
-
         df = convert_df_to_upper(df)
 
+        df = export_invalid_date_rows(df, 'payment_date', filename_prefix='stat_invalid_dates')
 
         for col in ['date_de_reglement', 'date_de_sinistre', 'payment_date', 'incident_date']:
             if col in df.columns:
