@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import (CountryStatisticsDetailView, GlobalStatisticsDetailView, CountriesListStatisticsView, ClientStatisticView,
+from .views import (CountryStatisticsDetailView, GlobalStatisticsDetailView, CountriesListStatisticsView, ClientStatisticView, GlobalClientStatisticListView,
  ClientStatisticListView, ClientPolicyStatisticsView, ClientPolicyListStatisticsView, PartnerStatisticsView, PartnerListStatisticsView,
  CountryPartnerStatisticsView, CountryPartnerListStatisticsView, ClientPartnerStatisticsView, ClientPartnerListStatisticsView,
  PolicyPartnerStatisticsView, PolicyPartnerListStatisticsView, PartnerStatisticsView, CountryInsuredStatisticsView, CountryInsuredListStatisticsView,
@@ -11,6 +11,7 @@ urlpatterns = [
     path('global/statistics/', GlobalStatisticsDetailView.as_view(), name='global-statistics-detail'), 
     path('countries/statistics/', CountriesListStatisticsView.as_view(), name='countries-list-statistics-detail'),
     path('clients/<int:client_id>/statistics/', ClientStatisticView.as_view(), name='client-statistics-detail'),
+    path('global/clients/statistics/', GlobalClientStatisticListView.as_view(), name='global-client-statistics-list-detail'),
     path('clients/statistics/', ClientStatisticListView.as_view(), name='client-statistics-list-detail'),
     path('clients/policies/<int:policy_id>/statistics/', ClientPolicyStatisticsView.as_view(), name='client-policy-statistics-detail'),
     path('clients/policies/statistics/', ClientPolicyListStatisticsView.as_view(), name='client-policy-list-statistics-detail'),

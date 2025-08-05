@@ -6,7 +6,7 @@ from rest_framework import status
 from users.permissions import IsSuperUser, IsGlobalAdmin, IsTerritorialAdmin, IsChefDeptTech, IsResponsableOperateur
 from .services.country_statistics import CountryStatisticsService
 from .services.global_statistics import GlobalStatisticsService, CountriesListStatisticsService
-from .services.client_statistics import ClientStatisticsService, ClientStatisticListService
+from .services.client_statistics import ClientStatisticsService, ClientStatisticListService, GlobalClientsListService
 from .services.policy_statistics import ClientPolicyStatisticsService, ClientPolicyListStatisticsService
 from .services.partner_statistics import (PartnerStatisticsService, PartnerListStatisticsService, CountryPartnerStatisticsService,
 CountryPartnerListStatisticsService, ClientPartnerStatisticsService, ClientPartnerListStatisticsService, PolicyPartnerStatisticsService,
@@ -247,6 +247,48 @@ class ClientStatisticListView(APIView):
             )
         except Exception as e:
             logger.error(f"Unexpected error in ClientStatisticView: {e}")
+            return Response(
+                {"error": "Une erreur inattendue s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class GlobalClientStatisticListView(APIView):
+    permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
+
+    def post(self, request):
+        
+        user = request.user
+        date_start = request.data.get('date_start')
+        date_end = request.data.get('date_end')
+        
+        if not request.user.is_active:
+            return Response(
+                {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération. Veuillez contacter votre administrateur hiérarchique."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if not (date_start and date_end):
+            return Response(
+                {"error": "date_start et date_end sont requis."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            service = GlobalClientsListService(date_start, date_end)
+            
+            statistics = service.get_all_clients_statistics_list()
+            
+            return Response(statistics, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in GlobalClientStatisticListView: {e}")
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in GlobalClientStatisticListView: {e}")
             return Response(
                 {"error": "Une erreur inattendue s'est produite."}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
