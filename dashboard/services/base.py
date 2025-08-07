@@ -28,6 +28,111 @@ def get_granularity(date_start, date_end):
     else:
         return 'year'
 
+def get_granularity_with_points(date_start, date_end):
+    """
+    Détermine la granularité optimale et génère les points de dates correspondants.
+    
+    Args:
+        date_start (datetime): Date de début
+        date_end (datetime): Date de fin
+        
+    Returns:
+        tuple: (granularity, points) où:
+            - granularity: 'day', 'month', 'quarter', ou 'year'
+            - points: liste des points de dates selon la granularité
+    """
+    delta = date_end - date_start
+    
+    if delta.days <= 31:
+        granularity = 'day'
+        points = generate_day_points(date_start, date_end)
+    elif delta.days <= 365:
+        granularity = 'month'
+        points = generate_month_points(date_start, date_end)
+    elif delta.days <= 5 * 365:
+        granularity = 'quarter'
+        points = generate_quarter_points(date_start, date_end)
+    else:
+        granularity = 'year'
+        points = generate_year_points(date_start, date_end)
+    
+    return granularity, points
+
+def generate_day_points(date_start, date_end):
+    """Génère les points par jour."""
+    points = []
+    current = date_start
+    
+    while current <= date_end:
+        points.append(current)
+        current += timedelta(days=1)
+    
+    return points
+
+def generate_month_points(date_start, date_end):
+    """Génère les points par mois (premier jour de chaque mois)."""
+    points = []
+    current = date_start.replace(day=1)
+    
+    while current <= date_end:
+        points.append(current)
+        current += relativedelta(months=1)
+    
+    return points
+
+def generate_quarter_points(date_start, date_end):
+    """Génère les points par trimestre (premier jour de chaque trimestre)."""
+    points = []
+    
+    # Déterminer le premier trimestre
+    start_quarter = ((date_start.month - 1) // 3) + 1
+    start_quarter_month = (start_quarter - 1) * 3 + 1
+    
+    current = date_start.replace(month=start_quarter_month, day=1)
+    
+    while current <= date_end:
+        points.append(current)
+        current += relativedelta(months=3)
+    
+    return points
+
+def generate_year_points(date_start, date_end):
+    """Génère les points par année (premier janvier de chaque année)."""
+    points = []
+    current = date_start.replace(month=1, day=1)
+    
+    while current <= date_end:
+        points.append(current)
+        current += relativedelta(years=1)
+    
+    return points
+
+def format_date_label(date, granularity):
+    """
+    Formate une date selon la granularité pour l'affichage graphique.
+    
+    Args:
+        date (datetime): Date à formater
+        granularity (str): Granularité ('day', 'month', 'quarter', 'year')
+        
+    Returns:
+        str: Label formaté pour l'affichage
+    """
+    if granularity == 'day':
+        return date.strftime("%d %b %Y")  # ex: "1 Jan 2025"
+    elif granularity == 'month':
+        return date.strftime("%b %Y")     # ex: "Jan 2025"
+    elif granularity == 'quarter':
+        quarter = ((date.month - 1) // 3) + 1
+        return f"Q{quarter} {date.year}"  # ex: "Q1 2025"
+    else:  # year
+        return str(date.year)             # ex: "2025"
+
+# Fonction utilitaire pour compatibilité avec l'ancien code
+def date_label(date, granularity):
+    """Alias pour format_date_label pour compatibilité."""
+    return format_date_label(date, granularity)
+
 
 
 def sanitize_float(value):
@@ -326,10 +431,10 @@ def format_top_clients_series(top_clients_data, periods, granularity):
 
 def format_top_categories_series(top_categories_data, periods, granularity):
     """
-    Formats top partners' data for ApexCharts.
+    Formats top categories' data for ApexCharts.
     
     Args:
-        top_partners_data (list): Top partners data
+        top_categories_data (list): Top categories data
         periods (list): List of periods
         granularity (str): Temporal granularity
         

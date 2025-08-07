@@ -601,8 +601,6 @@ class ClientPolicyStatisticsService:
 
 
 
-
-
 class ClientPolicyListStatisticsService:
     """
     Service to generate statistics for all policies of a specific client over a given period.
@@ -871,4 +869,5 @@ class ClientPolicyListStatisticsService:
         except Exception as e:
             logger.error(f"Error generating policies statistics: {e}")
             return {}
+
 

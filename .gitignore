@@ -1,0 +1,130 @@
+downloads
+media
+invalid_data.xlsx
+
+
+regarde comment je faisais la creation de InsuredEmployer qui est un many to many 
+entre le client, l'assure pour identifier un assure d'un client et la politique
+
+Aide moi a integrer cela dans mon data mapper pour assurer ce lien
+
+>>>>
+InsuredEmployer.objects.get_or_create(
+            insured=insured,
+            employer=client,
+            policy=policy,
+            defaults=dict(
+                role={'A': 'primary', 'C': 'spouse', 'E': 'child'}.get(row["Statut Assuré"], 'other'),
+                primary_insured_ref=insured.primary_insured,
+                file=file
+            )
+        )
+
+>>>> voici les models concernés
+
+class Client(models.Model):
+    id = models.AutoField(primary_key=True)
+    contact = models.CharField(max_length=255, null=True, blank=True)
+    creation_date = models.DateTimeField(auto_now_add=True)
+    modification_date = models.DateTimeField(auto_now=True)
+    name = models.CharField(max_length=255)
+    country = models.ForeignKey(Country, on_delete=models.CASCADE, related_name='clients')
+    prime = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    file = models.ForeignKey(File, on_delete=models.SET_NULL, null=True, blank=True, related_name='clients')
+    import_session = models.ForeignKey(ImportSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='imported_clients')
+
+    def __str__(self):
+        return self.name
+    
+    def update_prime(self, new_prime):
+        ClientPrimeHistory.objects.create(client=self, prime=self.prime)
+        self.prime = new_prime
+        self.save()
+
+class ClientPrimeHistory(models.Model):
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='prime_history')
+    prime = models.DecimalField(max_digits=10, decimal_places=2)  # valeur historisée du champ prime
+    date = models.DateTimeField(auto_now_add=True)  # date de modification du champ prime
+
+    def __str__(self):
+        return f"{self.client.name} - {self.date}"
+
+
+class Policy(models.Model):
+    id = models.AutoField(primary_key=True)
+    creation_date = models.DateTimeField(auto_now_add=True)
+    policy_number = models.CharField(max_length=255)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='policies')
+    file = models.ForeignKey(File, on_delete=models.SET_NULL, null=True, blank=True, related_name='policies')
+    import_session = models.ForeignKey(ImportSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='imported_policies')
+
+    def __str__(self):
+        return self.policy_number
+
+
+class Insured(models.Model):
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=255)
+    birth_date = models.DateField(null=True, blank=True)
+    creation_date = models.DateTimeField(auto_now_add=True)
+    modification_date = models.DateTimeField(auto_now=True)
+    card_number = models.CharField(max_length=255, null=True, blank=True)
+    phone_number = models.CharField(max_length=20, null=True, blank=True)
+    email = models.EmailField(max_length=255, null=True, blank=True)
+    consumption_limit = models.FloatField(null=True, blank=True)
+    is_primary_insured = models.BooleanField(default=False)
+    is_child = models.BooleanField(default=False)
+    is_spouse = models.BooleanField(default=False)
+    primary_insured = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='dependents')
+    file = models.ForeignKey(File, on_delete=models.SET_NULL, null=True, blank=True, related_name='insureds')
+    import_session = models.ForeignKey(ImportSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='imported_insureds')
+
+    def __str__(self):
+        return f'{self.name}'
+
+    def get_primary_for_employer(self, employer):
+        try:
+            link = self.insured_employers.get(employer=employer)
+            return link.primary_insured_ref
+        except InsuredEmployer.DoesNotExist:
+            return None
+
+
+class InsuredEmployer(models.Model):
+    insured = models.ForeignKey('Insured', on_delete=models.CASCADE, related_name='insured_clients')
+    employer = models.ForeignKey('Client', on_delete=models.CASCADE, related_name='client_insureds')
+    policy = models.ForeignKey('Policy', on_delete=models.CASCADE, related_name='insured_employers')
+    file = models.ForeignKey(File, on_delete=models.SET_NULL, null=True, blank=True, related_name='insured_employers')
+    import_session = models.ForeignKey(ImportSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='imported_insured_employers')
+
+    ROLE_CHOICES = (
+        ('primary', 'Assuré principal'),
+        ('spouse', 'Conjoint(e)'),
+        ('child', 'Enfant'),
+        ('other', 'Autre'),
+    )
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='primary')
+
+    primary_insured_ref = models.ForeignKey(
+        'Insured',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='dependents_in_clients',
+        help_text="Renseigner si l’assuré est conjoint ou enfant."
+    )
+
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('insured', 'employer', 'policy')
+
+    def __str__(self):
+        return f"{self.insured.name} chez {self.employer.name} ({self.get_role_display()})"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.role != 'primary' and not self.primary_insured_ref:
+            raise ValidationError("Un assuré dépendant doit avoir un assuré principal référencé.")
+        if self.role == 'primary' and self.primary_insured_ref:
+            raise ValidationError("Un assuré principal ne peut pas référencer un autre assuré principal.")

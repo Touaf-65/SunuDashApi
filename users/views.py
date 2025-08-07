@@ -231,8 +231,21 @@ class VerifyPassword(APIView):
 
 class PasswordResetRequestView(APIView):
     """
-    API view to handle password reset requests. 
-    It generates a reset token and sends a reset link to the user's email.
+    API endpoint to handle password reset requests.
+    
+    This endpoint generates a unique reset token and sends a password reset link
+    to the user's email address. The token expires after 24 hours.
+    
+    Method: POST
+    Request body:
+        {
+            "email": "user@example.com"
+        }
+    
+    Returns:
+        - 200 OK: Reset email sent successfully
+        - 400 Bad Request: Invalid email format or user not found
+        - 500 Internal Server Error: Email sending failed
     """
 
     def post(self, request):
@@ -299,8 +312,22 @@ class PasswordResetRequestView(APIView):
 
 class PasswordResetConfirmView(APIView):
     """
-    Allows a user to reset their password using a valid token.
-    Sends a confirmation email upon successful reset.
+    API endpoint to confirm password reset using a valid token.
+    
+    This endpoint allows users to set a new password using the token received
+    via email. The token is automatically deleted after successful password reset.
+    
+    Method: POST
+    Request body:
+        {
+            "token": "uuid-token",
+            "new_password": "new_password",
+            "confirm_password": "new_password"
+        }
+    
+    Returns:
+        - 200 OK: Password reset successful
+        - 400 Bad Request: Invalid token, expired token, or password mismatch
     """
 
     def post(self, request):
@@ -898,8 +925,11 @@ class TerritorialAdminListView(APIView):
 
 class TerritorialAdminMixin:
     """
-    Mixin to retrieve a territorial admin by primary key.
-    Ensures the user has the correct role.
+    Utility mixin to retrieve a territorial administrator by primary key.
+    
+    This mixin provides a common method to get territorial admin objects
+    and handle the case where the admin doesn't exist. It ensures the user
+    has the correct ADMIN_TERRITORIAL role.
     """
     def get_object(self, pk):
         try:
@@ -910,7 +940,17 @@ class TerritorialAdminMixin:
 
 class TerritorialAdminDetailView(APIView, TerritorialAdminMixin):
     """
-    Retrieve details of a territorial admin.
+    API endpoint to retrieve details of a territorial administrator.
+    
+    This endpoint allows global admins to view the complete information
+    of a territorial administrator including their assigned country.
+    
+    Method: GET
+    URL parameter: pk (user ID)
+    
+    Returns:
+        - 200 OK: Territorial admin details
+        - 404 Not Found: If admin doesn't exist
     """
     permission_classes = [IsAuthenticated, IsGlobalAdmin]
 
@@ -931,8 +971,18 @@ class TerritorialAdminDetailView(APIView, TerritorialAdminMixin):
 
 class TerritorialAdminUpdateView(APIView, TerritorialAdminMixin):
     """
-    Update the information of a territorial admin.
-    Partial update allowed.
+    API endpoint to update a territorial administrator's information.
+    
+    This endpoint allows global admins to modify territorial admin details.
+    Partial updates are supported - only provided fields will be updated.
+    
+    Method: PUT
+    URL parameter: pk (user ID)
+    
+    Returns:
+        - 200 OK: Updated territorial admin details
+        - 400 Bad Request: Invalid data
+        - 404 Not Found: If admin doesn't exist
     """
     permission_classes = [IsAuthenticated, IsGlobalAdmin]
 
@@ -957,8 +1007,17 @@ class TerritorialAdminUpdateView(APIView, TerritorialAdminMixin):
 
 class TerritorialAdminDeleteView(APIView, TerritorialAdminMixin):
     """
-    Delete (hard-delete) a territorial admin.
-    Accessible by superusers and global admins.
+    API endpoint to delete a territorial administrator.
+    
+    This endpoint performs a hard delete of the territorial admin user.
+    The operation is irreversible and will remove all associated data.
+    
+    Method: DELETE
+    URL parameter: pk (user ID)
+    
+    Returns:
+        - 204 No Content: Admin successfully deleted
+        - 404 Not Found: If admin doesn't exist
     """
     permission_classes = [IsAuthenticated, IsGlobalAdmin]
 
@@ -1428,8 +1487,11 @@ class SimpleUserListView(APIView):
 
 class SimpleUserMixin:
     """
-    Mixin to retrieve a simple user by primary key.
-    Excludes superusers and admin users.
+    Utility mixin to retrieve a simple user by primary key.
+    
+    This mixin provides a common method to get simple user objects and ensures
+    the user belongs to the same country as the requesting territorial admin.
+    It excludes superusers and admin users from the query results.
     """
 
     def get_object(self, pk):

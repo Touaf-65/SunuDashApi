@@ -8,7 +8,10 @@ from .services.country_statistics import CountryStatisticsService
 from .services.global_statistics import GlobalStatisticsService, CountriesListStatisticsService
 from .services.client_statistics import ClientStatisticsService, ClientStatisticListService, GlobalClientsListService
 from .services.policy_statistics import ClientPolicyStatisticsService, ClientPolicyListStatisticsService
-from .services.partner_statistics import (PartnerStatisticsService, PartnerListStatisticsService, CountryPartnerStatisticsService,
+from .services.country_policy_statistics import CountryPolicyListService
+from .services.policy_list_service import GlobalAdminPolicyListService
+from .services.territorial_policy_list_service import TerritorialAdminPolicyListService
+from .services.partner_statistics import (GlobalPartnerStatisticsService, PartnerStatisticsService, GlobalPartnerListStatisticsService, CountryPartnerStatisticsService,
 CountryPartnerListStatisticsService, ClientPartnerStatisticsService, ClientPartnerListStatisticsService, PolicyPartnerStatisticsService,
 )
 from .services.insured_statistics import CountryInsuredStatisticsService, CountryInsuredListService, CountryFamilyStatisticsService 
@@ -20,21 +23,43 @@ logger = logging.getLogger(__name__)
 
 class CountryStatisticsDetailView(APIView):
     """
-    Vue pour récupérer les séries temporelles statistiques d'un pays donné sur une période.
-    Utilise le service CountryStatisticsService pour la logique métier.
+    API endpoint to retrieve time series statistics for a specific country over a given period.
+    
+    This view provides comprehensive statistical data for a country including:
+    - Client evolution over time
+    - Premium and claim amounts
+    - Insured population statistics
+    - Partner consumption data
+    
+    Method: POST
+    URL parameter: country_id (int)
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD"
+        }
+    
+    Returns:
+        - 200 OK: Complete country statistics with time series data
+        - 400 Bad Request: Invalid date parameters
+        - 403 Forbidden: User not authorized or account disabled
+        - 500 Internal Server Error: System error during processing
     """
     permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
 
     def post(self, request, country_id):
         """
-        Récupère les statistiques d'un pays sur une période donnée.
+        Retrieve comprehensive statistics for a specific country over a given time period.
+        
+        This method processes date parameters, validates user permissions, and returns
+        formatted statistical data including time series for various metrics.
         
         Args:
-            request: Requête HTTP contenant date_start et date_end
-            country_id (int): ID du pays
+            request: HTTP request containing date_start and date_end in request.data
+            country_id (int): ID of the country to get statistics for
             
         Returns:
-            Response: Données statistiques formatées pour le frontend
+            Response: Formatted statistical data with time series for frontend consumption
         """
         if not request.user.is_active:
             return Response(
@@ -69,21 +94,42 @@ class CountryStatisticsDetailView(APIView):
 
 class GlobalStatisticsDetailView(APIView):
     """
-    Vue pour récupérer les séries temporelles statistiques d'un pays donné sur une période.
-    Utilise le service CountryStatisticsService pour la logique métier.
+    API endpoint to retrieve global statistics across all countries over a given period.
+    
+    This view provides comprehensive statistical data for all countries including:
+    - Global client evolution over time
+    - Total premium and claim amounts across all countries
+    - Global insured population statistics
+    - Cross-country partner consumption data
+    - Top clients and countries consumption rankings
+    
+    Method: POST
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD"
+        }
+    
+    Returns:
+        - 200 OK: Complete global statistics with time series data
+        - 400 Bad Request: Invalid date parameters
+        - 403 Forbidden: User not authorized (Global Admin only)
+        - 500 Internal Server Error: System error during processing
     """
     permission_classes = [IsAuthenticated, IsGlobalAdmin]
 
     def post(self, request):
         """
-        Récupère les statistiques d'un pays sur une période donnée.
+        Retrieve comprehensive global statistics across all countries over a given time period.
+        
+        This method processes date parameters and returns formatted statistical data
+        including time series for various global metrics and cross-country comparisons.
         
         Args:
-            request: Requête HTTP contenant date_start et date_end
-            country_id (int): ID du pays
+            request: HTTP request containing date_start and date_end in request.data
             
         Returns:
-            Response: Données statistiques formatées pour le frontend
+            Response: Formatted global statistical data with time series for frontend consumption
         """
         try:
             # Extraction des paramètres
@@ -115,22 +161,43 @@ class GlobalStatisticsDetailView(APIView):
             )
 
 
-class CountriesListStatisticsView(APIView):
+class GlobalCountriesListStatisticsView(APIView):
     """
-    Vue pour récupérer les statistiques globales de la liste des pays sur une période donnée.
-    Utilise le service CountriesListStatisticsService pour la logique métier.
+    API endpoint to retrieve statistics for the list of all countries over a given period.
+    
+    This view provides statistical data for all countries in a list format including:
+    - Country-wise client counts
+    - Country-wise premium and claim amounts
+    - Country-wise insured population data
+    - Country consumption rankings
+    
+    Method: POST
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD"
+        }
+    
+    Returns:
+        - 200 OK: Complete countries list statistics
+        - 400 Bad Request: Invalid date parameters
+        - 403 Forbidden: User not authorized (Global Admin only)
+        - 500 Internal Server Error: System error during processing
     """
     permission_classes = [IsAuthenticated, IsGlobalAdmin]
 
     def post(self, request):
         """
-        Récupère les statistiques globales pour la liste des pays sur une période donnée.
-
+        Retrieve statistics for the list of all countries over a given time period.
+        
+        This method processes date parameters and returns formatted statistical data
+        for all countries in a list format for comparison and ranking purposes.
+        
         Args:
-            request: Requête HTTP contenant date_start et date_end
-
+            request: HTTP request containing date_start and date_end in request.data
+            
         Returns:
-            Response: Données statistiques formatées pour le frontend
+            Response: Formatted countries list statistics for frontend consumption
         """
         try:
             date_start = request.data.get('date_start')
@@ -156,22 +223,45 @@ class CountriesListStatisticsView(APIView):
             )
 
 
-class ClientStatisticView(APIView):
+class CountryClientStatisticsDetailView(APIView):
     """
-    API View for client statistics using ClientStatisticsService.
+    API endpoint to retrieve comprehensive statistics for a specific client over a given period.
+    
+    This view provides detailed statistical data for a specific client including:
+    - Client consumption patterns over time
+    - Premium and claim amounts for the client
+    - Insured population statistics for the client
+    - Partner consumption data for the client's insured members
+    
+    Method: POST
+    URL parameter: client_id (int)
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD"
+        }
+    
+    Returns:
+        - 200 OK: Complete client statistics with time series data
+        - 400 Bad Request: Invalid date parameters or client not found
+        - 403 Forbidden: User not authorized or account disabled
+        - 500 Internal Server Error: System error during processing
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request, client_id):
         """
-        Generate comprehensive statistics for a specific client.
+        Retrieve comprehensive statistics for a specific client over a given time period.
+        
+        This method processes date parameters, validates client existence, and returns
+        formatted statistical data including time series for various client metrics.
         
         Args:
-            request: HTTP request with date_start and date_end
-            client_id: ID of the client
+            request: HTTP request containing date_start and date_end in request.data
+            client_id (int): ID of the client to get statistics for
             
         Returns:
-            Response: JSON response with all client statistics
+            Response: Formatted client statistical data with time series for frontend consumption
         """
         user = request.user
         date_start = request.data.get('date_start')
@@ -210,10 +300,45 @@ class ClientStatisticView(APIView):
             )
 
 
-class ClientStatisticListView(APIView):
+class CountryClientStatisticsListView(APIView):
+    """
+    API endpoint to retrieve statistics list for all clients of a specific country over a given period.
+    
+    This view provides statistical data for all clients in a country including:
+    - Client-wise consumption statistics
+    - Client-wise premium and claim amounts
+    - Client-wise insured population data
+    - Client consumption rankings within the country
+    
+    Method: POST
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD",
+            "country_id": "int"
+        }
+    
+    Returns:
+        - 200 OK: Complete clients list statistics for the country
+        - 400 Bad Request: Invalid date parameters or country not found
+        - 403 Forbidden: User not authorized or account disabled
+        - 500 Internal Server Error: System error during processing
+    """
     permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
 
     def post(self, request):
+        """
+        Retrieve statistics list for all clients of a specific country over a given time period.
+        
+        This method processes date parameters and country_id, then returns formatted statistical data
+        for all clients in the specified country for comparison and ranking purposes.
+        
+        Args:
+            request: HTTP request containing date_start, date_end, and country_id in request.data
+            
+        Returns:
+            Response: Formatted clients list statistics for the country for frontend consumption
+        """
     
         user = request.user
         date_start = request.data.get('date_start')
@@ -253,10 +378,44 @@ class ClientStatisticListView(APIView):
             )
 
 
-class GlobalClientStatisticListView(APIView):
+class GlobalClientStatisticsListView(APIView):
+    """
+    API endpoint to retrieve statistics list for all clients globally over a given period.
+    
+    This view provides statistical data for all clients across all countries including:
+    - Global client-wise consumption statistics
+    - Global client-wise premium and claim amounts
+    - Global client-wise insured population data
+    - Global client consumption rankings across all countries
+    
+    Method: POST
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD"
+        }
+    
+    Returns:
+        - 200 OK: Complete global clients list statistics
+        - 400 Bad Request: Invalid date parameters
+        - 403 Forbidden: User not authorized or account disabled
+        - 500 Internal Server Error: System error during processing
+    """
     permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
 
     def post(self, request):
+        """
+        Retrieve statistics list for all clients globally over a given time period.
+        
+        This method processes date parameters and returns formatted statistical data
+        for all clients across all countries for global comparison and ranking purposes.
+        
+        Args:
+            request: HTTP request containing date_start and date_end in request.data
+            
+        Returns:
+            Response: Formatted global clients list statistics for frontend consumption
+        """
         
         user = request.user
         date_start = request.data.get('date_start')
@@ -295,100 +454,245 @@ class GlobalClientStatisticListView(APIView):
             )
 
 
-class ClientPolicyStatisticsView(APIView):
+class GlobalPolicyListView(APIView):
     """
-    API View for policy statistics using ClientPolicyStatisticsService.
-    Generates comprehensive statistics for a specific policy within a date range.
+    API endpoint to list policies with filtering capabilities for Global Administrators.
+    
+    This view provides policy listing functionality with comprehensive filtering options:
+    - GET: Returns available filter options (countries, clients)
+    - POST: Returns filtered policies list with statistics
+    
+    Supports filtering by:
+    - Country selection
+    - Client selection
+    - Date ranges
+    - Policy status
+    
+    Method: GET/POST
+    Permissions: Global administrators only
+    Access: All policies from all countries with country and client filtering
+    
+    Returns:
+        - 200 OK: Filter options (GET) or filtered policies list (POST)
+        - 400 Bad Request: Invalid filter parameters
+        - 403 Forbidden: User not authorized (Global Admin only)
+        - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [IsAuthenticated, IsGlobalAdmin]
 
-    def post(self, request, policy_id):
+    def get(self, request):
         """
-        Generate comprehensive statistics for a specific policy.
+        Get available filter options for global administrators.
         
-        Args:
-            request: HTTP request with date_start and date_end
-            policy_id: ID of the policy to analyze
+        Query Parameters:
+            country_id (optional): Get clients for specific country
             
         Returns:
-            Response: JSON response with all policy statistics
+            dict: Available countries and clients for filtering
         """
-        if not request.user.is_active:
-            return Response(
-                {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération. Veuillez contacter votre administrateur hiérarchique."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
         try:
-            # Extract and validate input parameters
-            date_start = request.data.get('date_start')
-            date_end = request.data.get('date_end')
-            
-            if not (date_start and date_end):
+            if not request.user.is_active:
                 return Response(
-                    {"error": "date_start et date_end sont requis."},
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "Compte utilisateur inactif."}, 
+                    status=status.HTTP_403_FORBIDDEN
                 )
             
-            # Initialize the service
-            logger.info(f"Generating policy statistics for policy {policy_id} from {date_start} to {date_end}")
-            policy_service = ClientPolicyStatisticsService(policy_id, date_start, date_end)
+            # Check if user is global admin
+            is_global_admin = (
+                request.user.is_superuser or 
+                getattr(request.user, 'is_global_admin', False)
+            )
             
-            # Check if policy exists
-            if not policy_service.policy:
+            if not is_global_admin:
                 return Response(
-                    {"error": f"Police {policy_id} non trouvée."},
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Accès réservé aux administrateurs globaux."}, 
+                    status=status.HTTP_403_FORBIDDEN
                 )
             
-            # Generate statistics
-            statistics_data = policy_service.generate_statistics()
+            # Create service instance with minimal parameters to get filter options
+            service = GlobalAdminPolicyListService(
+                user=request.user,
+                date_start_str="2024-01-01",  # Dummy dates for filter options
+                date_end_str="2024-12-31"
+            )
             
-            if not statistics_data:
-                return Response(
-                    {"error": "Erreur lors de la génération des statistiques de la police."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
+            country_id = request.query_params.get('country_id')
             
-            logger.info(f"Successfully generated policy statistics for policy {policy_id}")
-            return Response(statistics_data, status=status.HTTP_200_OK)
+            return Response({
+                "countries": service.get_available_countries(),
+                "clients": service.get_available_clients(int(country_id) if country_id else None)
+            }, status=status.HTTP_200_OK)
             
-        except ValueError as e:
-            logger.error(f"Validation error in policy statistics: {e}")
+        except ValidationError as e:
+            logger.error(f"Validation error in GlobalAdminPolicyListView GET: {e}")
             return Response(
-                {"error": f"Erreur de validation: {str(e)}"},
+                {"error": str(e)}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         except Exception as e:
-            logger.error(f"Unexpected error in policy statistics: {e}")
-            logger.error(traceback.format_exc())
+            logger.error(f"Unexpected error in GlobalAdminPolicyListView GET: {e}")
             return Response(
-                {"error": "Erreur interne du serveur."},
+                {"error": "Une erreur inattendue s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def post(self, request):
+        """
+        Get filtered policies list with statistics for global administrators.
+        
+        Request Body:
+            date_start (str): Start date in YYYY-MM-DD format
+            date_end (str): End date in YYYY-MM-DD format
+            country_id (int, optional): Filter by country
+            client_id (int, optional): Filter by client
+            
+        Returns:
+            dict: Complete policies data with statistics and filter options
+        """
+        try:
+            if not request.user.is_active:
+                return Response(
+                    {"error": "Compte utilisateur inactif."}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Check if user is global admin
+            is_global_admin = (
+                request.user.is_superuser or 
+                getattr(request.user, 'is_global_admin', False)
+            )
+            
+            if not is_global_admin:
+                return Response(
+                    {"error": "Accès réservé aux administrateurs globaux."}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Extract and validate request data
+            date_start = request.data.get('date_start')
+            date_end = request.data.get('date_end')
+            country_id = request.data.get('country_id')
+            client_id = request.data.get('client_id')
+            
+            if not date_start or not date_end:
+                return Response(
+                    {"error": "Les dates de début et de fin sont requises."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Create service and get complete data
+            service = GlobalAdminPolicyListService(
+                user=request.user,
+                date_start_str=date_start,
+                date_end_str=date_end,
+                country_id=int(country_id) if country_id else None,
+                client_id=int(client_id) if client_id else None
+            )
+            
+            complete_data = service.get_complete_data()
+            return Response(complete_data, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in GlobalAdminPolicyListView POST: {e}")
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in GlobalAdminPolicyListView POST: {e}")
+            return Response(
+                {"error": "Une erreur inattendue s'est produite."}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 
-class ClientPolicyListStatisticsView(APIView):
+class TerritorialPolicyListView(APIView):
     """
-    API view to get statistics for all policies of a specific client.
+    API endpoint to list policies with filtering capabilities for Territorial Administrators.
+    
+    This view provides policy listing functionality with country-restricted filtering options:
+    - GET: Returns available filter options (clients from their assigned country)
+    - POST: Returns filtered policies list with statistics from their assigned country
+    
+    Supports filtering by:
+    - Client selection (from assigned country only)
+    - Date ranges
+    - Policy status
+    
+    Method: GET/POST
+    Permissions: Territorial administrators only
+    Access: Only policies from the admin's assigned country with client filtering
+    
+    Returns:
+        - 200 OK: Filter options (GET) or filtered policies list (POST)
+        - 400 Bad Request: Invalid filter parameters
+        - 403 Forbidden: User not authorized (Territorial Admin only)
+        - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [IsAuthenticated, IsTerritorialAdmin]
+    
+    def get(self, request):
+        """
+        Get available filter options for territorial administrators.
+        
+        Returns:
+            dict: Available clients for filtering (from admin's country)
+        """
+        try:
+            if not request.user.is_active:
+                return Response(
+                    {"error": "Compte utilisateur inactif."}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Create service instance with minimal parameters to get filter options
+            service = TerritorialAdminPolicyListService(
+                user=request.user,
+                date_start_str="2024-01-01",  # Dummy dates for filter options
+                date_end_str="2024-12-31"
+            )
+            
+            return Response({
+                "clients": service.get_available_clients(),
+                "country_context": {
+                    "id": service.assigned_country.id,
+                    "name": service.assigned_country.name,
+                    "code": getattr(service.assigned_country, 'code', '')
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in TerritorialAdminPolicyListView GET: {e}")
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in TerritorialAdminPolicyListView GET: {e}")
+            return Response(
+                {"error": "Une erreur inattendue s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     def post(self, request):
         """
-        Generate statistics for all policies of a client.
+        Get filtered policies list with statistics for territorial administrators.
         
-        Args:
-            client_id (int): ID of the client
-            
-        Request body:
+        Request Body:
             date_start (str): Start date in YYYY-MM-DD format
             date_end (str): End date in YYYY-MM-DD format
+            client_id (int, optional): Filter by client
             
         Returns:
-            Response: JSON response with policies statistics
+            dict: Complete policies data with statistics and filter options
         """
         try:
+            if not request.user.is_active:
+                return Response(
+                    {"error": "Compte utilisateur inactif."}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
             # Extract and validate request data
             date_start = request.data.get('date_start')
             date_end = request.data.get('date_end')
@@ -396,46 +700,57 @@ class ClientPolicyListStatisticsView(APIView):
             
             if not date_start or not date_end:
                 return Response(
-                    {"error": "date_start et date_end sont requis."},
+                    {"error": "Les dates de début et de fin sont requises."}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Initialize and use the service
-            service = ClientPolicyListStatisticsService(
-                client_id=client_id,
+            # Create service and get complete data
+            service = TerritorialAdminPolicyListService(
+                user=request.user,
                 date_start_str=date_start,
-                date_end_str=date_end
+                date_end_str=date_end,
+                client_id=int(client_id) if client_id else None
             )
             
-            # Generate statistics
-            statistics = service.get_policies_statistics()
-            
-            return Response(statistics, status=status.HTTP_200_OK)
+            complete_data = service.get_complete_data()
+            return Response(complete_data, status=status.HTTP_200_OK)
             
         except ValidationError as e:
-            logger.error(f"Validation error in client policy list statistics: {e}")
+            logger.error(f"Validation error in TerritorialAdminPolicyListView POST: {e}")
             return Response(
-                {"error": f"Erreur de validation: {str(e)}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except ValueError as e:
-            logger.error(f"Value error in client policy list statistics: {e}")
-            return Response(
-                {"error": f"Erreur de validation: {str(e)}"},
+                {"error": str(e)}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         except Exception as e:
-            logger.error(f"Unexpected error in client policy list statistics: {e}")
-            logger.error(traceback.format_exc())
+            logger.error(f"Unexpected error in TerritorialAdminPolicyListView POST: {e}")
             return Response(
-                {"error": "Erreur interne du serveur."},
+                {"error": "Une erreur inattendue s'est produite."}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 
-class PartnerStatisticsView(APIView):
+class GlobalPartnerStatisticsView(APIView):
     """
-    API view to get global statistics for all partners (prestataires).
+    API endpoint to retrieve global statistics for all partners (healthcare providers).
+    
+    This view provides comprehensive statistical data for all partners across all countries including:
+    - Global partner consumption statistics
+    - Global partner claim amounts and reimbursements
+    - Global partner performance metrics
+    - Cross-country partner comparisons
+    
+    Method: POST
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD"
+        }
+    
+    Returns:
+        - 200 OK: Complete global partner statistics
+        - 400 Bad Request: Invalid date parameters
+        - 403 Forbidden: User not authorized
+        - 500 Internal Server Error: System error during processing
     """
     permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
     
@@ -462,7 +777,7 @@ class PartnerStatisticsView(APIView):
                 )
             
             # Initialize and use the service
-            service = PartnerStatisticsService(
+            service = GlobalPartnerStatisticsService(
                 date_start_str=date_start,
                 date_end_str=date_end
             )
@@ -493,9 +808,28 @@ class PartnerStatisticsView(APIView):
             )
 
 
-class PartnerListStatisticsView(APIView):
+class GlobalPartnerListStatisticsView(APIView):
     """
-    API view to get a list of all partners sorted by consumption.
+    API endpoint to retrieve a list of all partners sorted by consumption globally.
+    
+    This view provides a ranked list of all partners across all countries including:
+    - Partner consumption rankings
+    - Partner performance metrics
+    - Partner claim and reimbursement data
+    - Cross-country partner comparisons
+    
+    Method: POST
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD"
+        }
+    
+    Returns:
+        - 200 OK: Complete global partners list sorted by consumption
+        - 400 Bad Request: Invalid date parameters
+        - 403 Forbidden: User not authorized
+        - 500 Internal Server Error: System error during processing
     """
     permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
     
@@ -522,7 +856,7 @@ class PartnerListStatisticsView(APIView):
                 )
             
             # Initialize and use the service
-            service = PartnerListStatisticsService(
+            service = GlobalPartnerStatisticsService(
                 date_start_str=date_start,
                 date_end_str=date_end
             )
@@ -559,7 +893,7 @@ class CountryPartnerStatisticsView(APIView):
     """
     permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
     
-    def post(self, request, country_id):
+    def post(self, request):
         """
         Generate partner statistics for a specific country.
         
@@ -574,6 +908,7 @@ class CountryPartnerStatisticsView(APIView):
             # Extract and validate request data
             date_start = request.data.get('date_start')
             date_end = request.data.get('date_end')
+            country_id = request.data.get('country_id')
             
             if not date_start or not date_end:
                 return Response(
@@ -922,7 +1257,6 @@ class PolicyPartnerListStatisticsView(APIView):
 
 
 
-
 class PartnerStatisticsView(APIView):
     """
     API View for client statistics using ClientStatisticsService.
@@ -975,7 +1309,6 @@ class PartnerStatisticsView(APIView):
                 {"error": "Une erreur inattendue s'est produite."}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
 
 
 

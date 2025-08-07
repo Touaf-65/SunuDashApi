@@ -6,7 +6,8 @@ from .base import (
     generate_periods, fill_full_series, serie_to_pairs,
     compute_evolution_rate, format_series_for_multi_line_chart,
     format_top_clients_series, format_top_partners_series, to_date,
-    format_top_categories_series,
+    format_top_categories_series, get_granularity_with_points,
+    format_date_label, date_label,
 )
 import logging
 import json
@@ -45,7 +46,24 @@ class ClientStatisticsService:
         try:
             self.client_id = int(client_id)
             self.date_start, self.date_end = parse_date_range(date_start_str, date_end_str)
-            self.granularity = get_granularity(self.date_start, self.date_end)
+            # self.granularity = get_granularity(self.date_start, self.date_end)
+
+            self.granularity, self.granularity_points = get_granularity_with_points(
+                self.date_start, self.date_end
+            )
+            
+            # Génération des labels pour les graphiques
+            self.granularity_labels = [
+                format_date_label(point, self.granularity) 
+                for point in self.granularity_points
+            ]
+            
+            # Génération des timestamps pour ApexCharts
+            self.granularity_timestamps = [
+                int(point.timestamp() * 1000) 
+                for point in self.granularity_points
+            ]
+
             self.trunc = get_trunc_function(self.granularity)
             self._setup_base_filters()
         except (ValueError, TypeError) as e:
@@ -655,6 +673,8 @@ class ClientStatisticsService:
         # Prepare the complete statistics dictionary
         statistics = {
             "granularity": self.granularity,
+            "granularity_timestamps": self.granularity_timestamps,
+            "granularity_labels": self.granularity_labels,
             
             # Time series
             "policies_series": policies_series_pairs,

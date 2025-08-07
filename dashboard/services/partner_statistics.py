@@ -13,7 +13,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class PartnerStatisticsService:
+class GlobalPartnerStatisticsService:
     """
     Service to generate global statistics for all partners (prestataires) over a given period.
     """
@@ -392,7 +392,7 @@ class PartnerStatisticsService:
             return {}
 
 
-class PartnerListStatisticsService:
+class GlobalPartnerListStatisticsService:
     """
     Service to retrieve a list of all partners sorted by consumption with detailed information.
     """
@@ -560,7 +560,7 @@ class PartnerListStatisticsService:
             }
 
 
-class CountryPartnerStatisticsService(PartnerStatisticsService):
+class CountryPartnerStatisticsService(GlobalPartnerStatisticsService):
     """
     Service to generate partner statistics for a specific country over a given period.
     Extends PartnerStatisticsService with country-specific filtering.
@@ -630,7 +630,7 @@ class CountryPartnerStatisticsService(PartnerStatisticsService):
 
 
 
-class CountryPartnerListStatisticsService(PartnerListStatisticsService):
+class CountryPartnerListStatisticsService(GlobalPartnerListStatisticsService):
     """
     Service to retrieve a list of all partners for a specific country, sorted by consumption.
     Extends PartnerListStatisticsService with country-specific filtering.
@@ -707,7 +707,7 @@ class CountryPartnerListStatisticsService(PartnerListStatisticsService):
             }
 
 
-class ClientPartnerStatisticsService(PartnerStatisticsService):
+class ClientPartnerStatisticsService(GlobalPartnerStatisticsService):
     """
     Service to generate partner statistics for a specific client over a given period.
     Extends PartnerStatisticsService with client-specific filtering.
@@ -787,7 +787,7 @@ class ClientPartnerStatisticsService(PartnerStatisticsService):
 
 
 
-class ClientPartnerListStatisticsService(PartnerListStatisticsService):
+class ClientPartnerListStatisticsService(GlobalPartnerListStatisticsService):
     """
     Service to retrieve a list of all partners where a client's insured members have consumed,
     sorted by consumption.
@@ -876,7 +876,7 @@ class ClientPartnerListStatisticsService(PartnerListStatisticsService):
             }
 
 
-class PolicyPartnerStatisticsService(PartnerStatisticsService):
+class PolicyPartnerStatisticsService(GlobalPartnerStatisticsService):
     """
     Service to generate partner statistics for a specific policy over a given period.
     Extends PartnerStatisticsService with policy-specific filtering.
@@ -945,7 +945,7 @@ class PolicyPartnerStatisticsService(PartnerStatisticsService):
             return {}
 
 
-class PolicyPartnerListStatisticsService(PartnerListStatisticsService):
+class PolicyPartnerListStatisticsService(GlobalPartnerListStatisticsService):
     """
     Service to retrieve a list of all partners where a policy's insured members have consumed,
     sorted by consumption.

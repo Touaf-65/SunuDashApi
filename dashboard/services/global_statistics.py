@@ -321,9 +321,6 @@ class GlobalStatisticsService:
         country_ids = [c.id for c in countries]
         country_names = {c.id: c.name for c in countries}
         
-        print(f"Countries: {country_names}")
-        print(f"country_names.get(country_id, str(country_id)): {country_names.get(1, 'Unknown Country')}")
-
         countries_series = []
         for country_id in country_ids:
             client_ids = list(Client.objects.filter(country_id=country_id).values_list('id', flat=True))
@@ -367,7 +364,6 @@ class GlobalStatisticsService:
         top_clients_series = self.get_top_clients_consumption()
         countries_consumption_series = self.get_countries_consumption_multiline_series()
 
-        print(f'country series: {countries_consumption_series}')
         
         # Calculating the S/P ratio
         sp_ratio_series = self.get_sp_ratio_timeseries(primes_series, reimbursed_series)
@@ -413,7 +409,6 @@ class GlobalStatisticsService:
             countries_consumption_series, periods, self.granularity
         )
 
-        print(f"countries_consumption_series_multi: {countries_consumption_series_multi}")
 
         # Calculating actual values
         actual_values = self._calculate_actual_values(
