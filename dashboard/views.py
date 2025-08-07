@@ -23,7 +23,7 @@ class CountryStatisticsDetailView(APIView):
     Vue pour récupérer les séries temporelles statistiques d'un pays donné sur une période.
     Utilise le service CountryStatisticsService pour la logique métier.
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin, IsTerritorialAdmin, IsChefDeptTech]
+    permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
 
     def post(self, request, country_id):
         """

@@ -322,6 +322,62 @@ def format_top_clients_series(top_clients_data, periods, granularity):
     return series_multi, categories
 
 
+
+
+def format_top_categories_series(top_categories_data, periods, granularity):
+    """
+    Formats top partners' data for ApexCharts.
+    
+    Args:
+        top_partners_data (list): Top partners data
+        periods (list): List of periods
+        granularity (str): Temporal granularity
+        
+    Returns:
+        tuple: (series_multi, categories)
+    """
+    period_dates = [to_date(p) for p in periods]
+    series_multi = []
+    
+    for top in top_categories_data:
+        name = top.get("category_name") or str(top.get("category_id"))
+        value_map = {to_date(point['period']): float(point['value'] or 0) 
+                    for point in top["series"]}
+        data = [value_map.get(p, 0) for p in period_dates]
+        series_multi.append({"name": name, "data": data})
+    
+    categories = [date_label(p, granularity) for p in period_dates]
+    
+    return series_multi, categories
+
+
+def format_top_partners_series(top_partners_data, periods, granularity):
+    """
+    Formats top partners' data for ApexCharts.
+    
+    Args:
+        top_partners_data (list): Top partners data
+        periods (list): List of periods
+        granularity (str): Temporal granularity
+        
+    Returns:
+        tuple: (series_multi, categories)
+    """
+    period_dates = [to_date(p) for p in periods]
+    series_multi = []
+    
+    for top in top_partners_data:
+        name = top.get("partner_name") or str(top.get("partner_id"))
+        value_map = {to_date(point['period']): float(point['value'] or 0) 
+                    for point in top["series"]}
+        data = [value_map.get(p, 0) for p in period_dates]
+        series_multi.append({"name": name, "data": data})
+    
+    categories = [date_label(p, granularity) for p in period_dates]
+    
+    return series_multi, categories
+
+
 def format_top_insureds_series(top_insureds_data, periods, granularity):
     """
     Formats top insureds' data for ApexCharts.

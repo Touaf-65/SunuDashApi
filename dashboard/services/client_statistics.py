@@ -5,7 +5,8 @@ from .base import (
     get_granularity, get_trunc_function, parse_date_range,
     generate_periods, fill_full_series, serie_to_pairs,
     compute_evolution_rate, format_series_for_multi_line_chart,
-    format_top_clients_series, to_date
+    format_top_clients_series, format_top_partners_series, to_date,
+    format_top_categories_series,
 )
 import logging
 import json
@@ -344,7 +345,7 @@ class ClientStatisticsService:
         Returns:
             dict: Dictionary of series by role
         """
-        roles = ['primary', 'spouse', 'child', 'other']
+        roles = ['primary', 'spouse', 'child']
         insured_by_role = {}
         
         for role in roles:
@@ -444,6 +445,7 @@ class ClientStatisticsService:
                     "partner_name": partner_names.get(partner_id, str(partner_id)),
                     "series": partner_series
                 })
+
             
             return top_partners_series
         except Exception as e:
@@ -592,6 +594,8 @@ class ClientStatisticsService:
         total_insured_series = self.get_total_insured_evolution()
         insured_by_role = self.get_insured_by_role_evolution()
         top_partners_series = self.get_top_partners_consumption()
+        top_partners_table = self.get_top_partners_table()
+        top_categories_series = self.get_top_categories_consumption()
         
         # Calculating the S/P ratio
         sp_ratio_series = self.get_sp_ratio_evolution(premium_series, reimbursed_series)
@@ -622,15 +626,18 @@ class ClientStatisticsService:
             'primary': 'Primary Insured',
             'spouse': 'Spouse Insured',
             'child': 'Child Insured',
-            'other': 'Other Insured',
         }
         insured_by_role_series = format_series_for_multi_line_chart(
             insured_by_role, periods, self.granularity, role_labels
         )
         
         # Formatting top partners
-        top_partners_series_multi, top_partners_categories = format_top_clients_series(
+        top_partners_series_multi, top_partners_categories = format_top_partners_series(
             top_partners_series, periods, self.granularity
+        )
+
+        top_categories_series_multi, top_categories_series_categories = format_top_categories_series(
+            top_categories_series, periods, self.granularity
         )
         
         # Calculating actual values (max of series over period)
@@ -661,6 +668,8 @@ class ClientStatisticsService:
             "insured_by_role_series": insured_by_role_series,
             "top_partners_consumption_series": top_partners_series_multi,
             "top_partners_consumption_categories": top_partners_categories,
+            "top_partners_table": top_partners_table,
+            "top_categories" : top_categories_series_multi,
             
             # Actual values
             **actual_values,
