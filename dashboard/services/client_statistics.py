@@ -1026,4 +1026,294 @@ class GlobalClientsListService:
                 "total_reimbursement": 0.0
             }
 
- 
+
+class GlobalClientStatisticsService:
+    """
+    Service to generate minimal global client statistics (4 essential metrics only).
+    
+    This service provides simple, current statistics about clients across all countries
+    with only the most essential metrics: total clients, countries count, total premium, and S/P ratio.
+    """
+
+    def __init__(self):
+        """
+        Initializes the service without date parameters for current totals only.
+        """
+        try:
+            self._setup_base_querysets()
+        except Exception as e:
+            logger.error(f"Error initializing GlobalClientStatisticsService: {e}")
+            raise ValidationError(f"Error initializing service: {e}")
+
+    def _setup_base_querysets(self):
+        """
+        Sets up optimized base querysets for essential client data only.
+        """
+        try:
+            # Base querysets for all clients
+            self.clients = Client.objects.all()
+            self.client_ids = list(self.clients.values_list('id', flat=True))
+
+            # Related querysets for premium calculation
+            self.policies = Policy.objects.select_related('client').filter(
+                client__in=self.client_ids
+            )
+            self.policy_ids = list(self.policies.values_list('id', flat=True))
+
+            # Claims data for S/P ratio calculation
+            self.claims = Claim.objects.select_related(
+                'invoice', 'policy__client', 'insured'
+            ).filter(
+                policy__in=self.policy_ids,
+                invoice__isnull=False
+            )
+
+            # Invoices data for claimed amount calculation
+            self.invoices = Invoice.objects.select_related(
+                'provider', 'insured'
+            ).filter(
+                insured__insured_clients__employer__in=self.client_ids
+            )
+
+        except Exception as e:
+            logger.error(f"Error setting up base querysets: {e}")
+            raise ValidationError(f"Error setting up querysets: {e}")
+
+    def get_total_clients_count(self):
+        """
+        Get the total number of clients across all countries.
+        
+        Returns:
+            int: Total number of clients
+        """
+        try:
+            return self.clients.count()
+        except Exception as e:
+            logger.error(f"Error getting total clients count: {e}")
+            return 0
+
+    def get_countries_count(self):
+        """
+        Get the number of countries with clients.
+        
+        Returns:
+            int: Number of countries with clients
+        """
+        try:
+            return self.clients.values('country').distinct().count()
+        except Exception as e:
+            logger.error(f"Error getting countries count: {e}")
+            return 0
+
+    def get_total_premium_amount(self):
+        """
+        Get the total premium amount across all clients.
+        
+        Returns:
+            float: Total premium amount
+        """
+        try:
+            total = self.clients.aggregate(total=Sum('prime'))['total']
+            return float(total or 0)
+        except Exception as e:
+            logger.error(f"Error getting total premium amount: {e}")
+            return 0.0
+
+    def get_total_claimed_amount(self):
+        """
+        Get the total claimed amount across all clients.
+        
+        Returns:
+            float: Total claimed amount
+        """
+        try:
+            total = self.invoices.aggregate(total=Sum('claimed_amount'))['total']
+            return float(total or 0)
+        except Exception as e:
+            logger.error(f"Error getting total claimed amount: {e}")
+            return 0.0
+
+    def _calculate_sp_ratio(self):
+        """
+        Calculate the S/P ratio (Sinistres/Primes) - claims to premium ratio.
+        
+        Returns:
+            float: S/P ratio as percentage
+        """
+        try:
+            total_premium = self.get_total_premium_amount()
+            if total_premium == 0:
+                return 0.0
+            
+            total_claimed = self.get_total_claimed_amount()
+            return round((total_claimed / total_premium) * 100, 2)
+        except Exception as e:
+            logger.error(f"Error calculating S/P ratio: {e}")
+            return 0.0
+
+    def get_complete_statistics(self):
+        """
+        Get minimal global client statistics with only 4 essential metrics.
+        
+        Returns:
+            dict: Minimal statistics dictionary with 4 key metrics
+        """
+        try:
+            return {
+                # Essential metrics only
+                "total_clients": self.get_total_clients_count(),
+                "countries_count": self.get_countries_count(),
+                "total_premium": self.get_total_premium_amount(),
+                "sp_ratio": self._calculate_sp_ratio(),
+            }
+        except Exception as e:
+            logger.error(f"Error getting complete statistics: {e}")
+            return {}
+
+
+class CountryClientStatisticsService:
+    """
+    Service to generate minimal country-specific client statistics (4 essential metrics only).
+    
+    This service provides simple, current statistics about clients for a specific country
+    with only the most essential metrics: total clients, total premium, and S/P ratio.
+    """
+
+    def __init__(self, country_id):
+        """
+        Initializes the service for a specific country.
+        
+        Args:
+            country_id (int): Country ID
+        """
+        try:
+            self.country_id = int(country_id)
+            self._setup_base_querysets()
+        except Exception as e:
+            logger.error(f"Error initializing CountryClientStatisticsService: {e}")
+            raise ValidationError(f"Error initializing service: {e}")
+
+    def _setup_base_querysets(self):
+        """
+        Sets up optimized base querysets for essential client data for a specific country.
+        """
+        try:
+            # Base querysets for clients in the specific country
+            self.clients = Client.objects.filter(country_id=self.country_id)
+            self.client_ids = list(self.clients.values_list('id', flat=True))
+
+            # Related querysets for premium calculation
+            self.policies = Policy.objects.select_related('client').filter(
+                client__in=self.client_ids
+            )
+            self.policy_ids = list(self.policies.values_list('id', flat=True))
+
+            # Claims data for S/P ratio calculation
+            self.claims = Claim.objects.select_related(
+                'invoice', 'policy__client', 'insured'
+            ).filter(
+                policy__in=self.policy_ids,
+                invoice__isnull=False
+            )
+
+            # Invoices data for claimed amount calculation
+            self.invoices = Invoice.objects.select_related(
+                'provider', 'insured'
+            ).filter(
+                insured__insured_clients__employer__in=self.client_ids
+            )
+
+        except Exception as e:
+            logger.error(f"Error setting up base querysets: {e}")
+            raise ValidationError(f"Error setting up querysets: {e}")
+
+    def get_total_clients_count(self):
+        """
+        Get the total number of clients in the specific country.
+        
+        Returns:
+            int: Total number of clients in the country
+        """
+        try:
+            return self.clients.count()
+        except Exception as e:
+            logger.error(f"Error getting total clients count: {e}")
+            return 0
+
+    def get_total_premium_amount(self):
+        """
+        Get the total premium amount for clients in the specific country.
+        
+        Returns:
+            float: Total premium amount for the country
+        """
+        try:
+            total = self.clients.aggregate(total=Sum('prime'))['total']
+            return float(total or 0)
+        except Exception as e:
+            logger.error(f"Error getting total premium amount: {e}")
+            return 0.0
+
+    def get_total_claimed_amount(self):
+        """
+        Get the total claimed amount for clients in the specific country.
+        
+        Returns:
+            float: Total claimed amount for the country
+        """
+        try:
+            total = self.invoices.aggregate(total=Sum('claimed_amount'))['total']
+            return float(total or 0)
+        except Exception as e:
+            logger.error(f"Error getting total claimed amount: {e}")
+            return 0.0
+
+    def get_total_insured_count(self):
+        """
+        Get the total number of insured people in the specific country.
+        
+        Returns:
+            int: Total number of insured people in the country
+        """
+        try:
+            return self.insured_employers.values('insured').distinct().count()
+        except Exception as e:
+            logger.error(f"Error getting total insured count: {e}")
+            return 0
+
+    def _calculate_sp_ratio(self):
+        """
+        Calculate the S/P ratio (Sinistres/Primes) for the specific country.
+        
+        Returns:
+            float: S/P ratio as percentage
+        """
+        try:
+            total_premium = self.get_total_premium_amount()
+            if total_premium == 0:
+                return 0.0
+            
+            total_claimed = self.get_total_claimed_amount()
+            return round((total_claimed / total_premium) * 100, 2)
+        except Exception as e:
+            logger.error(f"Error calculating S/P ratio: {e}")
+            return 0.0
+
+    def get_complete_statistics(self):
+        """
+        Get minimal country-specific client statistics with only 4 essential metrics.
+        
+        Returns:
+            dict: Minimal statistics dictionary with 4 key metrics
+        """
+        try:
+            return {
+                # Essential metrics for country
+                "total_clients": self.get_total_clients_count(),
+                "total_insured": self.get_total_insured_count(),
+                "total_premium": self.get_total_premium_amount(),
+                "sp_ratio": self._calculate_sp_ratio(),
+            }
+        except Exception as e:
+            logger.error(f"Error getting complete statistics: {e}")
+            return {}
