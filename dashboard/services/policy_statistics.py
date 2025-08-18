@@ -6,7 +6,8 @@ from .base import (
     get_granularity, get_trunc_function, parse_date_range,
     generate_periods, fill_full_series, serie_to_pairs,
     compute_evolution_rate, format_series_for_multi_line_chart,
-    format_top_clients_series, to_date
+    format_top_clients_series, to_date, get_granularity_with_points,
+    format_date_label
 )
 import logging
 import json
@@ -1637,10 +1638,302 @@ class GlobalPolicyListService:
 
 class GlobalPolicyStatisticsService:
     """
-    Service to generate global policy statistics across all countries.
+    Service to generate minimal global policy statistics (4 essential metrics only).
     
-    This service provides total counts for all policies, clients, insured, and claims
-    across all countries without any geographical restrictions.
+    This service provides simple, current statistics about policies across all countries
+    with only the most essential metrics: total policies, clients count, total premium, and S/P ratio.
+    """
+
+    def __init__(self):
+        """
+        Initializes the service without date parameters for current totals only.
+        """
+        try:
+            self._setup_base_querysets()
+        except Exception as e:
+            logger.error(f"Error initializing GlobalPolicyStatisticsService: {e}")
+            raise ValidationError(f"Error initializing service: {e}")
+
+    def _setup_base_querysets(self):
+        """
+        Sets up optimized base querysets for essential policy data only.
+        """
+        try:
+            # Base querysets for all policies
+            self.policies = Policy.objects.all()
+            self.policy_ids = list(self.policies.values_list('id', flat=True))
+
+            # Related querysets for premium calculation
+            self.clients = Client.objects.select_related('country').filter(
+                policies__in=self.policy_ids
+            ).distinct()
+            self.client_ids = list(self.clients.values_list('id', flat=True))
+
+            # Claims data for S/P ratio calculation
+            self.claims = Claim.objects.select_related(
+                'invoice', 'policy__client', 'insured'
+            ).filter(
+                policy__in=self.policy_ids,
+                invoice__isnull=False
+            )
+
+            # Invoices data for claimed amount calculation
+            self.invoices = Invoice.objects.select_related(
+                'provider', 'insured'
+            ).filter(
+                insured__insured_clients__employer__in=self.client_ids
+            )
+
+        except Exception as e:
+            logger.error(f"Error setting up base querysets: {e}")
+            raise ValidationError(f"Error setting up querysets: {e}")
+
+    def get_total_policies_count(self):
+        """
+        Get the total number of policies across all countries.
+        
+        Returns:
+            int: Total number of policies
+        """
+        try:
+            return self.policies.count()
+        except Exception as e:
+            logger.error(f"Error getting total policies count: {e}")
+            return 0
+
+    def get_clients_count(self):
+        """
+        Get the number of clients with policies.
+        
+        Returns:
+            int: Number of clients with policies
+        """
+        try:
+            return self.clients.count()
+        except Exception as e:
+            logger.error(f"Error getting clients count: {e}")
+            return 0
+
+    def get_total_premium_amount(self):
+        """
+        Get the total premium amount across all policies.
+        
+        Returns:
+            float: Total premium amount
+        """
+        try:
+            total = self.clients.aggregate(total=Sum('prime'))['total']
+            return float(total or 0)
+        except Exception as e:
+            logger.error(f"Error getting total premium amount: {e}")
+            return 0.0
+
+    def get_total_claimed_amount(self):
+        """
+        Get the total claimed amount across all policies.
+        
+        Returns:
+            float: Total claimed amount
+        """
+        try:
+            total = self.invoices.aggregate(total=Sum('claimed_amount'))['total']
+            return float(total or 0)
+        except Exception as e:
+            logger.error(f"Error getting total claimed amount: {e}")
+            return 0.0
+
+    def _calculate_sp_ratio(self):
+        """
+        Calculate the S/P ratio (Sinistres/Primes) - claims to premium ratio.
+        
+        Returns:
+            float: S/P ratio as percentage
+        """
+        try:
+            total_premium = self.get_total_premium_amount()
+            if total_premium == 0:
+                return 0.0
+            
+            total_claimed = self.get_total_claimed_amount()
+            return round((total_claimed / total_premium) * 100, 2)
+        except Exception as e:
+            logger.error(f"Error calculating S/P ratio: {e}")
+            return 0.0
+
+    def get_complete_statistics(self):
+        """
+        Get minimal global policy statistics with only 4 essential metrics.
+        
+        Returns:
+            dict: Minimal statistics dictionary with 4 key metrics
+        """
+        try:
+            return {
+                # Essential metrics only
+                "total_policies": self.get_total_policies_count(),
+                "clients_count": self.get_clients_count(),
+                "total_premium": self.get_total_premium_amount(),
+                "sp_ratio": self._calculate_sp_ratio(),
+            }
+        except Exception as e:
+            logger.error(f"Error getting complete statistics: {e}")
+            return {}
+
+
+class CountryPolicyStatisticsService:
+    """
+    Service to generate minimal country-specific policy statistics (4 essential metrics only).
+    
+    This service provides simple, current statistics about policies for a specific country
+    with only the most essential metrics: total policies, clients count, total premium, and S/P ratio.
+    """
+
+    def __init__(self, country_id):
+        """
+        Initializes the service for a specific country.
+        
+        Args:
+            country_id (int): Country ID
+        """
+        try:
+            self.country_id = int(country_id)
+            self._setup_base_querysets()
+        except Exception as e:
+            logger.error(f"Error initializing CountryPolicyStatisticsService: {e}")
+            raise ValidationError(f"Error initializing service: {e}")
+
+    def _setup_base_querysets(self):
+        """
+        Sets up optimized base querysets for essential policy data for a specific country.
+        """
+        try:
+            # Base querysets for policies in the specific country
+            self.clients = Client.objects.filter(country_id=self.country_id)
+            self.client_ids = list(self.clients.values_list('id', flat=True))
+
+            # Related querysets for policy calculation
+            self.policies = Policy.objects.select_related('client').filter(
+                client__in=self.client_ids
+            )
+            self.policy_ids = list(self.policies.values_list('id', flat=True))
+
+            # Claims data for S/P ratio calculation
+            self.claims = Claim.objects.select_related(
+                'invoice', 'policy__client', 'insured'
+            ).filter(
+                policy__in=self.policy_ids,
+                invoice__isnull=False
+            )
+
+            # Invoices data for claimed amount calculation
+            self.invoices = Invoice.objects.select_related(
+                'provider', 'insured'
+            ).filter(
+                insured__insured_clients__employer__in=self.client_ids
+            )
+
+        except Exception as e:
+            logger.error(f"Error setting up base querysets: {e}")
+            raise ValidationError(f"Error setting up querysets: {e}")
+
+    def get_total_policies_count(self):
+        """
+        Get the total number of policies for the specific country.
+        
+        Returns:
+            int: Total number of policies
+        """
+        try:
+            return self.policies.count()
+        except Exception as e:
+            logger.error(f"Error getting total policies count: {e}")
+            return 0
+
+    def get_clients_count(self):
+        """
+        Get the number of clients with policies in the specific country.
+        
+        Returns:
+            int: Number of clients with policies
+        """
+        try:
+            return self.clients.count()
+        except Exception as e:
+            logger.error(f"Error getting clients count: {e}")
+            return 0
+
+    def get_total_premium_amount(self):
+        """
+        Get the total premium amount for policies in the specific country.
+        
+        Returns:
+            float: Total premium amount
+        """
+        try:
+            total = self.clients.aggregate(total=Sum('prime'))['total']
+            return float(total or 0)
+        except Exception as e:
+            logger.error(f"Error getting total premium amount: {e}")
+            return 0.0
+
+    def get_total_claimed_amount(self):
+        """
+        Get the total claimed amount for policies in the specific country.
+        
+        Returns:
+            float: Total claimed amount
+        """
+        try:
+            total = self.invoices.aggregate(total=Sum('claimed_amount'))['total']
+            return float(total or 0)
+        except Exception as e:
+            logger.error(f"Error getting total claimed amount: {e}")
+            return 0.0
+
+    def _calculate_sp_ratio(self):
+        """
+        Calculate the S/P ratio (Sinistres/Primes) - claims to premium ratio.
+        
+        Returns:
+            float: S/P ratio as percentage
+        """
+        try:
+            total_premium = self.get_total_premium_amount()
+            if total_premium == 0:
+                return 0.0
+            
+            total_claimed = self.get_total_claimed_amount()
+            return round((total_claimed / total_premium) * 100, 2)
+        except Exception as e:
+            logger.error(f"Error calculating S/P ratio: {e}")
+            return 0.0
+
+    def get_complete_statistics(self):
+        """
+        Get minimal country-specific policy statistics with only 4 essential metrics.
+        
+        Returns:
+            dict: Minimal statistics dictionary with 4 key metrics
+        """
+        try:
+            return {
+                # Essential metrics only
+                "total_policies": self.get_total_policies_count(),
+                "clients_count": self.get_clients_count(),
+                "total_premium": self.get_total_premium_amount(),
+                "sp_ratio": self._calculate_sp_ratio(),
+            }
+        except Exception as e:
+            logger.error(f"Error getting complete statistics: {e}")
+            return {}
+
+
+class GlobalPolicyStatisticsDetailService:
+    """
+    Service to generate detailed global policy statistics with time series over a given period.
+    
+    This service provides comprehensive statistical data for all policies across all countries
+    including time series, evolution rates, and detailed metrics.
     """
     
     def __init__(self, date_start_str, date_end_str):
@@ -1653,14 +1946,16 @@ class GlobalPolicyStatisticsService:
         """
         try:
             self.date_start, self.date_end = parse_date_range(date_start_str, date_end_str)
+            self.granularity = get_granularity(self.date_start, self.date_end)
+            self.trunc = get_trunc_function(self.granularity)
             self._setup_base_querysets()
         except (ValueError, TypeError) as e:
-            logger.error(f"Invalid parameters for GlobalPolicyStatisticsService: {e}")
+            logger.error(f"Invalid parameters for GlobalPolicyStatisticsDetailService: {e}")
             raise ValidationError(f"Invalid parameters: {e}")
     
     def _setup_base_querysets(self):
         """
-        Set up base querysets for global statistics.
+        Set up base querysets for detailed global statistics.
         """
         try:
             # Base querysets for all data
@@ -1669,22 +1964,21 @@ class GlobalPolicyStatisticsService:
             self.insured_employers = InsuredEmployer.objects.all()
             self.claims = Claim.objects.all()
             
-            # Apply date filters if specified
-            if self.date_start and self.date_end:
-                self.clients = self.clients.filter(
-                    creation_date__range=(self.date_start, self.date_end)
-                )
-                self.policies = self.policies.filter(
-                    creation_date__range=(self.date_start, self.date_end)
-                )
-                self.insured_employers = self.insured_employers.filter(
-                    insured__creation_date__range=(self.date_start, self.date_end)
-                )
-                self.claims = self.claims.filter(
-                    settlement_date__range=(self.date_start, self.date_end)
-                )
+            # Apply date filters
+            self.clients = self.clients.filter(
+                creation_date__range=(self.date_start, self.date_end)
+            )
+            self.policies = self.policies.filter(
+                creation_date__range=(self.date_start, self.date_end)
+            )
+            self.insured_employers = self.insured_employers.filter(
+                insured__creation_date__range=(self.date_start, self.date_end)
+            )
+            self.claims = self.claims.filter(
+                settlement_date__range=(self.date_start, self.date_end)
+            )
             
-            logger.info(f"Global statistics: {self.clients.count()} clients, {self.policies.count()} policies")
+            logger.info(f"Global detailed statistics: {self.clients.count()} clients, {self.policies.count()} policies")
             
         except Exception as e:
             logger.error(f"Error setting up base querysets: {e}")
@@ -1741,10 +2035,10 @@ class GlobalPolicyStatisticsService:
         except Exception as e:
             logger.error(f"Error getting total claims count: {e}")
             return 0
-    
+
     def get_complete_statistics(self):
         """
-        Get complete global policy statistics.
+        Get complete global policy statistics with detailed metrics.
         
         Returns:
             dict: Complete statistics dictionary
@@ -1776,12 +2070,12 @@ class GlobalPolicyStatisticsService:
             }
 
 
-class CountryPolicyStatisticsService:
+class CountryPolicyStatisticsDetailService:
     """
-    Service to generate country-specific policy statistics.
+    Service to generate detailed country-specific policy statistics with time series over a given period.
     
-    This service provides total counts for policies, clients, insured, and claims
-    for a specific country with territorial access restrictions.
+    This service provides comprehensive statistical data for policies in a specific country
+    including time series, evolution rates, and detailed metrics.
     """
     
     def __init__(self, country_id, date_start_str, date_end_str):
@@ -1796,14 +2090,16 @@ class CountryPolicyStatisticsService:
         try:
             self.country_id = int(country_id)
             self.date_start, self.date_end = parse_date_range(date_start_str, date_end_str)
+            self.granularity = get_granularity(self.date_start, self.date_end)
+            self.trunc = get_trunc_function(self.granularity)
             self._setup_base_querysets()
         except (ValueError, TypeError) as e:
-            logger.error(f"Invalid parameters for CountryPolicyStatisticsService: {e}")
+            logger.error(f"Invalid parameters for CountryPolicyStatisticsDetailService: {e}")
             raise ValidationError(f"Invalid parameters: {e}")
     
     def _setup_base_querysets(self):
         """
-        Set up base querysets for country-specific statistics.
+        Set up base querysets for detailed country-specific statistics.
         """
         try:
             # Validate that country exists
@@ -1818,22 +2114,21 @@ class CountryPolicyStatisticsService:
             self.insured_employers = InsuredEmployer.objects.filter(employer__country_id=self.country_id)
             self.claims = Claim.objects.filter(policy__client__country_id=self.country_id)
             
-            # Apply date filters if specified
-            if self.date_start and self.date_end:
-                self.clients = self.clients.filter(
-                    creation_date__range=(self.date_start, self.date_end)
-                )
-                self.policies = self.policies.filter(
-                    creation_date__range=(self.date_start, self.date_end)
-                )
-                self.insured_employers = self.insured_employers.filter(
-                    insured__creation_date__range=(self.date_start, self.date_end)
-                )
-                self.claims = self.claims.filter(
-                    settlement_date__range=(self.date_start, self.date_end)
-                )
+            # Apply date filters
+            self.clients = self.clients.filter(
+                creation_date__range=(self.date_start, self.date_end)
+            )
+            self.policies = self.policies.filter(
+                creation_date__range=(self.date_start, self.date_end)
+            )
+            self.insured_employers = self.insured_employers.filter(
+                insured__creation_date__range=(self.date_start, self.date_end)
+            )
+            self.claims = self.claims.filter(
+                settlement_date__range=(self.date_start, self.date_end)
+            )
             
-            logger.info(f"Country {self.country_id} statistics: {self.clients.count()} clients, {self.policies.count()} policies")
+            logger.info(f"Country {self.country_id} detailed statistics: {self.clients.count()} clients, {self.policies.count()} policies")
             
         except Exception as e:
             logger.error(f"Error setting up base querysets: {e}")
@@ -1890,10 +2185,10 @@ class CountryPolicyStatisticsService:
         except Exception as e:
             logger.error(f"Error getting total claims count: {e}")
             return 0
-    
+
     def get_complete_statistics(self):
         """
-        Get complete country-specific policy statistics.
+        Get complete country-specific policy statistics with detailed metrics.
         
         Returns:
             dict: Complete statistics dictionary
@@ -1933,5 +2228,338 @@ class CountryPolicyStatisticsService:
                 },
                 "scope": "country"
             }
+
+
+class SpecificPolicyStatisticsService:
+    """
+    Service to generate statistics for a specific policy over a given period.
+    """
+    
+    def __init__(self, policy_id, date_start_str, date_end_str):
+        """
+        Initializes the service with the basic parameters.
+        
+        Args:
+            policy_id (int): Policy ID
+            date_start_str (str): Start date in YYYY-MM-DD format
+            date_end_str (str): End date in YYYY-MM-DD format
+        """
+        try:
+            self.policy_id = int(policy_id)
+            self.date_start, self.date_end = parse_date_range(date_start_str, date_end_str)
+            self.granularity, self.granularity_points = get_granularity_with_points(
+                self.date_start, self.date_end
+            )
+            
+            # Génération des labels pour les graphiques
+            self.granularity_labels = [
+                format_date_label(point, self.granularity) 
+                for point in self.granularity_points
+            ]
+            
+            # Génération des timestamps pour ApexCharts
+            self.granularity_timestamps = [
+                int(point.timestamp() * 1000) 
+                for point in self.granularity_points
+            ]
+
+            self.trunc = get_trunc_function(self.granularity)
+            self._setup_base_filters()
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid parameters for SpecificPolicyStatisticsService: {e}")
+            raise ValidationError(f"Invalid parameters: {e}")
+    
+    def _setup_base_filters(self):
+        """
+        Configures the base filters for queries with optimized querysets.
+        """
+        try:
+            # Base policy queryset with select_related
+            self.policy = Policy.objects.select_related('client', 'client__country').filter(
+                id=self.policy_id
+            ).first()
+            
+            # Validate that policy exists
+            if not self.policy:
+                logger.warning(f"No policy found for policy_id: {self.policy_id}")
+                raise ValidationError(f"Policy with ID {self.policy_id} does not exist")
+            
+            # Get client information
+            self.client = self.policy.client
+            self.client_id = self.client.id
+            
+            # Base claims queryset for this policy
+            self.claims = Claim.objects.select_related(
+                'invoice', 'policy__client', 'insured', 'partner', 'act__family'
+            ).filter(
+                policy_id=self.policy_id,
+                settlement_date__range=(self.date_start, self.date_end),
+                invoice__isnull=False
+            )
+            
+            # Generate all periods for the date range
+            self.periods = generate_periods(self.date_start, self.date_end, self.granularity)
+            
+            # Standard logging for monitoring
+            logger.info(f"Policy {self.policy_id}: {self.claims.count()} claims")
+            
+        except Exception as e:
+            logger.error(f"Error setting up base filters: {e}")
+            raise ValidationError(f"Error setting up filters: {e}")
+    
+    def get_claims_evolution(self):
+        """
+        Calculates the evolution of the number of claims.
+        
+        Returns:
+            list: Time series of the number of claims
+        """
+        try:
+            result = list(
+                self.claims
+                .annotate(period=self.trunc('settlement_date'))
+                .values('period')
+                .annotate(value=Count('id'))
+                .order_by('period')
+            )
+            
+            # Keep counts as integers
+            for point in result:
+                point['value'] = int(point['value'] or 0)
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_claims_evolution: {e}")
+            return []
+    
+    def get_reimbursed_amount_evolution(self):
+        """
+        Calculates the evolution of the reimbursed amount.
+        
+        Returns:
+            list: Time series of reimbursed amounts
+        """
+        try:
+            result = list(
+                self.claims
+                .annotate(period=self.trunc('settlement_date'))
+                .values('period')
+                .annotate(value=Sum('invoice__reimbursed_amount'))
+                .order_by('period')
+            )
+            
+            # Convert to float for monetary values
+            for point in result:
+                point['value'] = float(point['value'] or 0)
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_reimbursed_amount_evolution: {e}")
+            return []
+    
+    def get_claimed_amount_evolution(self):
+        """
+        Calculates the evolution of the claimed amount.
+        
+        Returns:
+            list: Time series of claimed amounts
+        """
+        try:
+            result = list(
+                self.claims
+                .annotate(period=self.trunc('settlement_date'))
+                .values('period')
+                .annotate(value=Sum('invoice__claimed_amount'))
+                .order_by('period')
+            )
+            
+            # Convert to float for monetary values
+            for point in result:
+                point['value'] = float(point['value'] or 0)
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_claimed_amount_evolution: {e}")
+            return []
+    
+    def get_insured_count_evolution(self):
+        """
+        Calculates the evolution of the number of insured individuals.
+        
+        Returns:
+            list: Time series of insured counts
+        """
+        try:
+            result = list(
+                self.claims
+                .annotate(period=self.trunc('settlement_date'))
+                .values('period')
+                .annotate(value=Count('insured', distinct=True))
+                .order_by('period')
+            )
+            
+            # Keep counts as integers
+            for point in result:
+                point['value'] = int(point['value'] or 0)
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_insured_count_evolution: {e}")
+            return []
+    
+    def get_partner_consumption_series(self):
+        """
+        Gets partner consumption series in the format [[timestamp, value], ...]
+        
+        Returns:
+            list: Time series of partner consumption as [timestamp, value] pairs
+        """
+        try:
+            # Get partner consumption data
+            partner_data = list(
+                self.claims
+                .annotate(period=self.trunc('settlement_date'))
+                .values('period', 'partner__name')
+                .annotate(value=Sum('invoice__reimbursed_amount'))
+                .order_by('period', 'partner__name')
+            )
+            
+            # Group by partner and format for chart
+            partner_series = {}
+            for item in partner_data:
+                partner_name = item['partner__name'] or 'Unknown'
+                if partner_name not in partner_series:
+                    partner_series[partner_name] = []
+                
+                partner_series[partner_name].append([
+                    int(item['period'].timestamp() * 1000),
+                    float(item['value'] or 0)
+                ])
+            
+            # Convert to list format for ApexCharts
+            result = []
+            for partner_name, series in partner_series.items():
+                result.append({
+                    'name': partner_name,
+                    'data': series
+                })
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_partner_consumption_series: {e}")
+            return []
+    
+    def get_act_family_consumption_series(self):
+        """
+        Gets act family consumption series in the format [[timestamp, value], ...]
+        
+        Returns:
+            list: Time series of act family consumption as [timestamp, value] pairs
+        """
+        try:
+            # Get act family consumption data
+            act_data = list(
+                self.claims
+                .annotate(period=self.trunc('settlement_date'))
+                .values('period', 'act__family__name')
+                .annotate(value=Sum('invoice__reimbursed_amount'))
+                .order_by('period', 'act__family__name')
+            )
+            
+            # Group by act family and format for chart
+            act_series = {}
+            for item in act_data:
+                family_name = item['act__family__name'] or 'Unknown'
+                if family_name not in act_series:
+                    act_series[family_name] = []
+                
+                act_series[family_name].append([
+                    int(item['period'].timestamp() * 1000),
+                    float(item['value'] or 0)
+                ])
+            
+            # Convert to list format for ApexCharts
+            result = []
+            for family_name, series in act_series.items():
+                result.append({
+                    'name': family_name,
+                    'data': series
+                })
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_act_family_consumption_series: {e}")
+            return []
+    
+    def get_complete_statistics(self):
+        """
+        Get complete statistics for the specific policy.
+        
+        Returns:
+            dict: Complete statistics dictionary
+        """
+        try:
+            # Get all time series data
+            claims_evolution = self.get_claims_evolution()
+            reimbursed_evolution = self.get_reimbursed_amount_evolution()
+            claimed_evolution = self.get_claimed_amount_evolution()
+            insured_evolution = self.get_insured_count_evolution()
+            partner_series = self.get_partner_consumption_series()
+            act_family_series = self.get_act_family_consumption_series()
+            
+            # Calculate totals
+            total_claims = sum(point['value'] for point in claims_evolution)
+            total_reimbursed = sum(point['value'] for point in reimbursed_evolution)
+            total_claimed = sum(point['value'] for point in claimed_evolution)
+            
+            # Calculate S/P ratio
+            sp_ratio = 0.0
+            if total_claimed > 0:
+                sp_ratio = round((total_reimbursed / total_claimed) * 100, 2)
+            
+            return {
+                "policy": {
+                    "id": self.policy.id,
+                    "name": getattr(self.policy, 'name', f'Policy {self.policy.id}'),
+                    "creation_date": self.policy.creation_date.isoformat() if self.policy.creation_date else None,
+                },
+                "client": {
+                    "id": self.client.id,
+                    "name": self.client.name,
+                    "country": {
+                        "id": self.client.country.id,
+                        "name": self.client.country.name,
+                        "code": getattr(self.client.country, 'code', '')
+                    }
+                },
+                "totals": {
+                    "total_claims": total_claims,
+                    "total_reimbursed": total_reimbursed,
+                    "total_claimed": total_claimed,
+                    "sp_ratio": sp_ratio,
+                },
+                "time_series": {
+                    "claims_evolution": claims_evolution,
+                    "reimbursed_evolution": reimbursed_evolution,
+                    "claimed_evolution": claimed_evolution,
+                    "insured_evolution": insured_evolution,
+                },
+                "charts": {
+                    "partner_consumption": partner_series,
+                    "act_family_consumption": act_family_series,
+                },
+                "date_range": {
+                    "start": self.date_start.isoformat(),
+                    "end": self.date_end.isoformat()
+                },
+                "granularity": {
+                    "type": self.granularity,
+                    "labels": self.granularity_labels,
+                    "timestamps": self.granularity_timestamps
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting complete statistics: {e}")
+            return {}
 
 

@@ -9,6 +9,8 @@ from .views import (
     GlobalPartnerListStatisticsView,
     GlobalPolicyListView,
     GlobalPolicyStatisticsView,
+    GlobalPolicyStatisticsDetailView,
+    SpecificPolicyStatisticsDetailView,
     
     # Country Statistics
     CountryStatisticsDetailView,
@@ -50,6 +52,7 @@ urlpatterns = [
     path('global/partners/list/', GlobalPartnerListStatisticsView.as_view(), name='global-partner-list-statistics'),
     path('global/policies/list/', GlobalPolicyListView.as_view(), name='global-policy-list'),
     path('global/policies/statistics/', GlobalPolicyStatisticsView.as_view(), name='global-policy-statistics'),
+    path('global/policies/statistics/detail/', GlobalPolicyStatisticsDetailView.as_view(), name='global-policy-statistics-detail'),
     
     # Country Statistics
     path('countries/<int:country_id>/statistics/', CountryStatisticsDetailView.as_view(), name='country-statistics-detail'),
@@ -72,6 +75,7 @@ urlpatterns = [
     path('clients/<int:client_id>/families/list/', ClientFamilyListView.as_view(), name='client-family-list'),
     
     # Policy Statistics
+    path('policies/<int:policy_id>/statistics/', SpecificPolicyStatisticsDetailView.as_view(), name='specific-policy-statistics-detail'),
     path('policies/<int:policy_id>/partners/statistics/', PolicyPartnerStatisticsView.as_view(), name='policy-partner-statistics'),
     path('policies/<int:policy_id>/partners/list/', PolicyPartnerListStatisticsView.as_view(), name='policy-partner-list-statistics'),
     

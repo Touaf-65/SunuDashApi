@@ -7,8 +7,11 @@ from users.permissions import IsSuperUser, IsGlobalAdmin, IsTerritorialAdmin, Is
 from .services.country_statistics import CountryStatisticsService
 from .services.global_statistics import GlobalStatisticsService, CountriesListStatisticsService
 from .services.client_statistics import ClientStatisticsService, ClientStatisticListService, GlobalClientsListService, CountryClientStatisticsService, GlobalClientStatisticsService
-from .services.policy_statistics import ClientPolicyStatisticsService, ClientPolicyListService, CountryPolicyListService, GlobalPolicyStatisticsService, CountryPolicyStatisticsService
-from .services.policy_statistics import GlobalPolicyListService
+from .services.policy_statistics import (
+    ClientPolicyStatisticsService, ClientPolicyListService, CountryPolicyListService, 
+    GlobalPolicyStatisticsService, CountryPolicyStatisticsService, GlobalPolicyListService,
+    GlobalPolicyStatisticsDetailService, CountryPolicyStatisticsDetailService, SpecificPolicyStatisticsService
+)
 from .services.partner_statistics import (GlobalPartnerStatisticsService, PartnerStatisticsService, GlobalPartnerListStatisticsService, CountryPartnerStatisticsService,
 CountryPartnerListStatisticsService, ClientPartnerStatisticsService, ClientPartnerListStatisticsService, PolicyPartnerStatisticsService, PolicyPartnerListStatisticsService
 )
@@ -1566,10 +1569,61 @@ class ClientFamilyListView(APIView):
 
 class GlobalPolicyStatisticsView(APIView):
     """
-    API endpoint to retrieve global policy statistics across all countries.
+    API endpoint to retrieve minimal global policy statistics (current totals only).
     
-    This view provides total counts for all policies, clients, insured, and claims
-    across all countries without any geographical restrictions.
+    This view provides simple, current statistics about policies across all countries
+    without time series or complex calculations. Perfect for dashboard overview cards.
+    
+    Method: GET
+    Permissions: Global administrators and territorial administrators
+    
+    Returns:
+        - 200 OK: Complete global policy statistics with current totals
+        - 403 Forbidden: User not authorized
+        - 500 Internal Server Error: System error during processing
+    """
+    permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
+
+    def get(self, request):
+        """
+        Retrieve minimal global policy statistics with current totals only.
+        
+        This method returns simple statistics about policies across all countries
+        including counts, financial metrics, and calculated ratios.
+        
+        Args:
+            request: HTTP request (no parameters required)
+            
+        Returns:
+            Response: Formatted global policy statistics for dashboard cards
+        """
+        try:
+            # Initialize the service
+            statistics_service = GlobalPolicyStatisticsService()
+            
+            # Get complete statistics
+            statistics_data = statistics_service.get_complete_statistics()
+            
+            return Response(statistics_data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error in GlobalPolicyStatisticsView: {e}")
+            traceback.print_exc()
+            return Response(
+                {"error": "Une erreur interne s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class GlobalPolicyStatisticsDetailView(APIView):
+    """
+    API endpoint to retrieve detailed global policy statistics across all countries over a given period.
+    
+    This view provides comprehensive statistical data for all policies across all countries including:
+    - Global policy evolution over time
+    - Total premium and claim amounts across all countries
+    - Global insured population statistics
+    - Cross-country policy comparisons
     
     Method: POST
     Request body:
@@ -1579,22 +1633,22 @@ class GlobalPolicyStatisticsView(APIView):
         }
     
     Returns:
-        - 200 OK: Complete global policy statistics
+        - 200 OK: Complete global policy statistics with time series data
         - 400 Bad Request: Invalid date parameters
-        - 403 Forbidden: User not authorized
+        - 403 Forbidden: User not authorized (Global Admin only)
         - 500 Internal Server Error: System error during processing
     """
     permission_classes = [IsAuthenticated, IsGlobalAdmin]
     
     def post(self, request):
         """
-        Retrieve global policy statistics across all countries.
+        Retrieve detailed global policy statistics across all countries over a given time period.
         
         Args:
             request: HTTP request containing date_start and date_end in request.data
             
         Returns:
-            Response: Global policy statistics with total counts
+            Response: Global policy statistics with detailed metrics
         """
         try:
             if not request.user.is_active:
@@ -1612,7 +1666,7 @@ class GlobalPolicyStatisticsView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            statistics_service = GlobalPolicyStatisticsService(date_start, date_end)
+            statistics_service = GlobalPolicyStatisticsDetailService(date_start, date_end)
             statistics_data = statistics_service.get_complete_statistics()
             
             return Response(statistics_data, status=status.HTTP_200_OK)
@@ -1623,7 +1677,7 @@ class GlobalPolicyStatisticsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         except Exception as e:
-            logger.error(f"Error in GlobalPolicyStatisticsView: {e}")
+            logger.error(f"Error in GlobalPolicyStatisticsDetailView: {e}")
             traceback.print_exc()
             return Response(
                 {"error": "Une erreur interne s'est produite."},
@@ -1635,25 +1689,66 @@ class CountryPolicyStatisticsView(APIView):
     """
     API endpoint to retrieve country-specific policy statistics.
     
-    This view provides total counts for policies, clients, insured, and claims
-    for a specific country with territorial access restrictions.
+    This view provides statistics about policies for a specific country:
+    - GET: Current totals only (minimal statistics)
+    - POST: Time series statistics over a given period
     
-    Method: POST
+    Method: GET/POST
     URL parameter: country_id (int)
-    Request body:
-        {
-            "date_start": "YYYY-MM-DD",
-            "date_end": "YYYY-MM-DD"
-        }
+    Permissions: Global administrators and territorial administrators
     
     Returns:
         - 200 OK: Complete country policy statistics
-        - 400 Bad Request: Invalid date parameters or country not found
+        - 400 Bad Request: Invalid country_id or date parameters
         - 403 Forbidden: User not authorized
         - 500 Internal Server Error: System error during processing
     """
     permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
-    
+
+    def get(self, request, country_id):
+        """
+        Retrieve minimal country-specific policy statistics with current totals only.
+        
+        This method returns simple statistics about policies for a specific country
+        including counts, financial metrics, and calculated ratios.
+        
+        Args:
+            request: HTTP request (no parameters required)
+            country_id (int): ID of the country to get statistics for
+            
+        Returns:
+            Response: Formatted country policy statistics for dashboard cards
+        """
+        try:
+            # Check if user is territorial admin and has access to this country
+            if hasattr(request.user, 'is_territorial_admin') and getattr(request.user, 'is_territorial_admin', False):
+                if not hasattr(request.user, 'country') or request.user.country.id != int(country_id):
+                    return Response(
+                        {"error": "Vous n'avez pas accès à ce pays."},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            
+            # Initialize the service
+            statistics_service = CountryPolicyStatisticsService(country_id)
+            
+            # Get complete statistics
+            statistics_data = statistics_service.get_complete_statistics()
+            
+            return Response(statistics_data, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Error in CountryPolicyStatisticsView: {e}")
+            traceback.print_exc()
+            return Response(
+                {"error": "Une erreur interne s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
     def post(self, request, country_id):
         """
         Retrieve country-specific policy statistics.
@@ -1689,7 +1784,7 @@ class CountryPolicyStatisticsView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            statistics_service = CountryPolicyStatisticsService(country_id, date_start, date_end)
+            statistics_service = CountryPolicyStatisticsDetailService(country_id, date_start, date_end)
             statistics_data = statistics_service.get_complete_statistics()
             
             return Response(statistics_data, status=status.HTTP_200_OK)
@@ -1975,6 +2070,83 @@ class CountryPolicyListView(APIView):
             )
         except Exception as e:
             logger.error(f"Unexpected error in CountryPolicyListView POST: {e}")
+            return Response(
+                {"error": "Une erreur inattendue s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class SpecificPolicyStatisticsDetailView(APIView):
+    """
+    API endpoint to retrieve comprehensive statistics for a specific policy over a given period.
+    
+    This view provides detailed statistical data for a specific policy including:
+    - Policy consumption patterns over time
+    - Claim amounts and reimbursements for the policy
+    - Insured population statistics for the policy
+    - Partner consumption data for the policy's claims
+    
+    Method: POST
+    URL parameter: policy_id (int)
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD"
+        }
+    
+    Returns:
+        - 200 OK: Complete policy statistics with time series data
+        - 400 Bad Request: Invalid date parameters or policy not found
+        - 403 Forbidden: User not authorized or account disabled
+        - 500 Internal Server Error: System error during processing
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, policy_id):
+        """
+        Retrieve comprehensive statistics for a specific policy over a given time period.
+        
+        This method processes date parameters, validates policy existence, and returns
+        formatted statistical data including time series for various policy metrics.
+        
+        Args:
+            request: HTTP request containing date_start and date_end in request.data
+            policy_id (int): ID of the policy to get statistics for
+            
+        Returns:
+            Response: Formatted policy statistical data with time series for frontend consumption
+        """
+        user = request.user
+        date_start = request.data.get('date_start')
+        date_end = request.data.get('date_end')
+        
+        if not request.user.is_active:
+            return Response(
+                {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération. Veuillez contacter votre administrateur hiérarchique."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if not (date_start and date_end):
+            return Response(
+                {"error": "date_start et date_end sont requis."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            service = SpecificPolicyStatisticsService(policy_id, date_start, date_end)
+            
+            statistics = service.get_complete_statistics()
+            
+            return Response(statistics, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in SpecificPolicyStatisticsDetailView: {e}")
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in SpecificPolicyStatisticsDetailView: {e}")
             return Response(
                 {"error": "Une erreur inattendue s'est produite."}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
