@@ -33,6 +33,8 @@ from .views import (
     # Client Statistics
     ClientPartnerStatisticsView,
     ClientPartnerListStatisticsView,
+    ClientPolicyStatisticsView,
+    ClientPolicyListStatisticsView,
     
     # Policy Statistics
     PolicyPartnerStatisticsView,
@@ -73,6 +75,8 @@ urlpatterns = [
     path('clients/<int:client_id>/partners/list/', ClientPartnerListStatisticsView.as_view(), name='client-partner-list-statistics'),
     path('clients/<int:client_id>/families/statistics/', ClientFamilyStatisticsView.as_view(), name='client-family-statistics'),
     path('clients/<int:client_id>/families/list/', ClientFamilyListView.as_view(), name='client-family-list'),
+    path('clients/<int:client_id>/policies/statistics/', ClientPolicyListStatisticsView.as_view(), name='client-policy-list-statistics'),
+    path('clients/<int:client_id>/policies/<int:policy_id>/statistics/', ClientPolicyStatisticsView.as_view(), name='client-policy-statistics'),
     
     # Policy Statistics
     path('policies/<int:policy_id>/statistics/', SpecificPolicyStatisticsDetailView.as_view(), name='specific-policy-statistics-detail'),

@@ -2152,3 +2152,166 @@ class SpecificPolicyStatisticsDetailView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+
+class ClientPolicyStatisticsView(APIView):
+    """
+    API endpoint to retrieve comprehensive statistics for a specific policy of a client over a given period.
+    
+    This view provides detailed statistical data for a specific policy of a client including:
+    - Policy consumption patterns over time
+    - Claim amounts and reimbursements for the policy
+    - Insured population statistics for the policy
+    - Partner consumption data for the policy's claims
+    - Top families, categories, and partners analysis
+    
+    Method: POST
+    URL parameters: client_id (int), policy_id (int)
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD"
+        }
+    
+    Returns:
+        - 200 OK: Complete policy statistics with time series data
+        - 400 Bad Request: Invalid date parameters or policy not found
+        - 403 Forbidden: User not authorized or account disabled
+        - 500 Internal Server Error: System error during processing
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, client_id, policy_id):
+        """
+        Retrieve comprehensive statistics for a specific policy of a client over a given time period.
+        
+        This method processes date parameters, validates policy existence and client ownership,
+        and returns formatted statistical data including time series for various policy metrics.
+        
+        Args:
+            request: HTTP request containing date_start and date_end in request.data
+            client_id (int): ID of the client
+            policy_id (int): ID of the policy to get statistics for
+            
+        Returns:
+            Response: Formatted policy statistical data with time series for frontend consumption
+        """
+        user = request.user
+        date_start = request.data.get('date_start')
+        date_end = request.data.get('date_end')
+        
+        if not request.user.is_active:
+            return Response(
+                {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération. Veuillez contacter votre administrateur hiérarchique."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if not (date_start and date_end):
+            return Response(
+                {"error": "date_start et date_end sont requis."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            service = ClientPolicyStatisticsService(policy_id, date_start, date_end)
+            
+            # Verify that the policy belongs to the specified client
+            if service.client.id != int(client_id):
+                return Response(
+                    {"error": "La police spécifiée n'appartient pas au client indiqué."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            statistics = service.generate_statistics()
+            
+            return Response(statistics, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in ClientPolicyStatisticsView: {e}")
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in ClientPolicyStatisticsView: {e}")
+            return Response(
+                {"error": "Une erreur inattendue s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class ClientPolicyListStatisticsView(APIView):
+    """
+    API endpoint to retrieve comprehensive statistics for all policies of a client over a given period.
+    
+    This view provides detailed statistical data for all policies of a client including:
+    - Consumption patterns by role (primary, spouse, child)
+    - Time series data for each policy
+    - Detailed table of all policies with statistics
+    - Consistency checks between role and policy consumption
+    
+    Method: POST
+    URL parameter: client_id (int)
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD"
+        }
+    
+    Returns:
+        - 200 OK: Complete client policies statistics with time series data
+        - 400 Bad Request: Invalid date parameters or client not found
+        - 403 Forbidden: User not authorized or account disabled
+        - 500 Internal Server Error: System error during processing
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, client_id):
+        """
+        Retrieve comprehensive statistics for all policies of a client over a given time period.
+        
+        This method processes date parameters, validates client existence, and returns
+        formatted statistical data including time series for all client policies.
+        
+        Args:
+            request: HTTP request containing date_start and date_end in request.data
+            client_id (int): ID of the client to get policies statistics for
+            
+        Returns:
+            Response: Formatted client policies statistical data with time series for frontend consumption
+        """
+        user = request.user
+        date_start = request.data.get('date_start')
+        date_end = request.data.get('date_end')
+        
+        if not request.user.is_active:
+            return Response(
+                {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération. Veuillez contacter votre administrateur hiérarchique."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if not (date_start and date_end):
+            return Response(
+                {"error": "date_start et date_end sont requis."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            service = ClientPolicyListService(client_id, date_start, date_end)
+            
+            statistics = service.get_policies_statistics()
+            
+            return Response(statistics, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in ClientPolicyListStatisticsView: {e}")
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in ClientPolicyListStatisticsView: {e}")
+            return Response(
+                {"error": "Une erreur inattendue s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
