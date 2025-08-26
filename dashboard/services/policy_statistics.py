@@ -2035,7 +2035,7 @@ class GlobalPolicyStatisticsDetailService:
         except Exception as e:
             logger.error(f"Error getting total claims count: {e}")
             return 0
-
+    
     def get_complete_statistics(self):
         """
         Get complete global policy statistics with detailed metrics.
@@ -2185,7 +2185,7 @@ class CountryPolicyStatisticsDetailService:
         except Exception as e:
             logger.error(f"Error getting total claims count: {e}")
             return 0
-
+    
     def get_complete_statistics(self):
         """
         Get complete country-specific policy statistics with detailed metrics.

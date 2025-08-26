@@ -1,0 +1,43 @@
+{% extends "email/templates/email_base.html" %}
+
+{% block content %}
+<div class="content-title">
+    Bonjour {{ user.first_name }} {{ user.last_name }},
+</div>
+
+<div class="content-text">
+    Vous êtes maintenant <strong>connecté avec succès</strong> à votre compte SUNU DASH !
+</div>
+
+<div class="info-card">
+    <div class="info-card-title">Détails de votre connexion</div>
+    <div class="info-card-content">
+        <strong>Date et heure :</strong> {{ login_info.login_time }}<br>
+        <strong>Adresse IP :</strong> {{ login_info.ip_address }}<br>
+        <strong>Navigateur :</strong> {{ login_info.user_agent }}<br>
+        <strong>Rôle :</strong> {{ login_info.role }}
+    </div>
+</div>
+
+<div class="content-text">
+    <strong>Que pouvez-vous faire maintenant ?</strong>
+</div>
+
+<ul style="margin: 20px 0; padding-left: 20px; color: #4a5568;">
+    <li style="margin-bottom: 10px;">Accéder à votre tableau de bord personnalisé</li>
+    <li style="margin-bottom: 10px;">Consulter les statistiques de votre territoire</li>
+    <li style="margin-bottom: 10px;">Gérer vos utilisateurs et données</li>
+    <li style="margin-bottom: 10px;">Exporter des rapports et analyses</li>
+</ul>
+
+<div style="text-align: center; margin: 30px 0;">
+    <a href="{{ frontend_url }}/dashboard" class="btn">
+        📊 Accéder au Tableau de Bord
+    </a>
+</div>
+
+<div class="alert alert-success">
+    <strong>✅ Sécurité :</strong> Cette connexion a été effectuée depuis un appareil autorisé. 
+    Si vous ne reconnaissez pas cette activité, contactez immédiatement notre équipe de sécurité.
+</div>
+{% endblock %}

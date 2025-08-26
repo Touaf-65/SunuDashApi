@@ -1,0 +1,63 @@
+{% extends "email/templates/email_base.html" %}
+
+{% block content %}
+<div class="content-title">
+    Bonjour {{ user.first_name }} {{ user.last_name }},
+</div>
+
+{% if assignment_type == "assign" %}
+<div class="content-text">
+    Vous avez été désigné comme <strong>Administrateur Territorial</strong> pour le pays : 
+    <strong style="color: #667eea;">{{ country.name }}</strong>.
+</div>
+{% elif assignment_type == "reassign" %}
+<div class="content-text">
+    Vous avez été réaffecté comme <strong>Administrateur Territorial</strong> pour le pays : 
+    <strong style="color: #667eea;">{{ country.name }}</strong>.
+</div>
+{% else %}
+<div class="content-text">
+    Vous avez été désaffecté en tant qu'administrateur territorial de votre pays actuel.
+</div>
+{% endif %}
+
+{% if assignment_type != "unassign" %}
+<div class="info-card">
+    <div class="info-card-title">Détails de l'affectation</div>
+    <div class="info-card-content">
+        <strong>Pays assigné :</strong> {{ country.name }}<br>
+        <strong>Date d'affectation :</strong> {{ assignment_date }}<br>
+        <strong>Rôle :</strong> Administrateur Territorial<br>
+        <strong>Code pays :</strong> {{ country.code|default:"N/A" }}
+    </div>
+</div>
+
+<div class="content-text">
+    <strong>Vos nouvelles responsabilités :</strong>
+</div>
+
+<ul style="margin: 20px 0; padding-left: 20px; color: #4a5568;">
+    <li style="margin-bottom: 10px;">Gestion des utilisateurs de votre territoire</li>
+    <li style="margin-bottom: 10px;">Supervision des données et statistiques</li>
+    <li style="margin-bottom: 10px;">Validation des imports et rapports</li>
+    <li style="margin-bottom: 10px;">Coordination avec l'équipe centrale</li>
+</ul>
+
+<div style="text-align: center; margin: 30px 0;">
+    <a href="{{ frontend_url }}/dashboard" class="btn">
+        🌍 Accéder à mon territoire
+    </a>
+</div>
+{% endif %}
+
+<div class="alert alert-success">
+    <strong>✅ Confirmation :</strong> 
+    {% if assignment_type == "assign" %}
+    Votre affectation a été enregistrée avec succès. Vous recevrez bientôt un guide d'utilisation détaillé.
+    {% elif assignment_type == "reassign" %}
+    Votre réaffectation a été enregistrée avec succès. Vos accès ont été mis à jour.
+    {% else %}
+    Votre désaffectation a été enregistrée. Vos accès territoriaux ont été révoqués.
+    {% endif %}
+</div>
+{% endblock %}

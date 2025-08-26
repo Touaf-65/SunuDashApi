@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>{{ subject|default:"SUNU DASH" }}</title>
+    
+    <!--[if mso]>
+    <noscript>
+        <xml>
+            <o:OfficeDocumentSettings>
+                <o:PixelsPerInch>96</o:PixelsPerInch>
+            </o:OfficeDocumentSettings>
+        </xml>
+    </noscript>
+    <![endif]-->
+    
+    <style>
+        /* Reset styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #1a202c;
+            background-color: #f7fafc;
+            margin: 0;
+            padding: 0;
+        }
+        
+        /* Container principal */
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        
+        /* Header */
+        .email-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 40px 30px;
+            text-align: center;
+            position: relative;
+        }
+        
+        .email-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="50" cy="10" r="0.5" fill="rgba(255,255,255,0.1)"/><circle cx="10" cy="60" r="0.5" fill="rgba(255,255,255,0.1)"/><circle cx="90" cy="40" r="0.5" fill="rgba(255,255,255,0.1)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+            opacity: 0.3;
+        }
+        
+        .logo {
+            max-width: 180px;
+            height: auto;
+            margin-bottom: 20px;
+            position: relative;
+            z-index: 1;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .header-title {
+            color: #ffffff;
+            font-size: 28px;
+            font-weight: 700;
+            margin: 0;
+            letter-spacing: -0.5px;
+            position: relative;
+            z-index: 1;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header-subtitle {
+            color: rgba(255, 255, 255, 0.95);
+            font-size: 16px;
+            margin-top: 8px;
+            font-weight: 400;
+            position: relative;
+            z-index: 1;
+        }
+        
+        /* Contenu principal */
+        .email-content {
+            padding: 40px 30px;
+        }
+        
+        .content-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: #2d3748;
+            margin-bottom: 20px;
+            line-height: 1.4;
+        }
+        
+        .content-text {
+            font-size: 16px;
+            color: #4a5568;
+            line-height: 1.7;
+            margin-bottom: 20px;
+        }
+        
+        /* Cartes d'information */
+        .info-card {
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+        
+        .info-card-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #2d3748;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .info-card-content {
+            font-size: 16px;
+            color: #2d3748;
+            font-weight: 500;
+            line-height: 1.6;
+        }
+        
+        /* Boutons */
+        .btn {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #ffffff;
+            text-decoration: none;
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 16px;
+            text-align: center;
+            transition: all 0.3s ease;
+            margin: 20px 0;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+        
+        .btn:hover::before {
+            left: 100%;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        /* Footer */
+        .email-footer {
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            padding: 30px;
+            text-align: center;
+            border-top: 1px solid #e2e8f0;
+        }
+        
+        .footer-logo {
+            max-width: 100px;
+            height: auto;
+            margin-bottom: 20px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .footer-text {
+            font-size: 14px;
+            color: #718096;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+        
+        .footer-links {
+            margin-top: 20px;
+        }
+        
+        .footer-link {
+            color: #667eea;
+            text-decoration: none;
+            font-size: 14px;
+            margin: 0 10px;
+            font-weight: 500;
+            transition: color 0.3s ease;
+        }
+        
+        .footer-link:hover {
+            color: #764ba2;
+            text-decoration: underline;
+        }
+        
+        /* Alertes */
+        .alert {
+            padding: 16px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid;
+        }
+        
+        .alert-success {
+            background-color: #f0fff4;
+            border-color: #48bb78;
+            color: #2f855a;
+        }
+        
+        .alert-warning {
+            background-color: #fffbeb;
+            border-color: #ed8936;
+            color: #c05621;
+        }
+        
+        .alert-info {
+            background-color: #ebf8ff;
+            border-color: #4299e1;
+            color: #2b6cb0;
+        }
+        
+        /* Responsive */
+        @media only screen and (max-width: 600px) {
+            .email-container {
+                margin: 0;
+                border-radius: 0;
+                box-shadow: none;
+            }
+            
+            .email-header,
+            .email-content,
+            .email-footer {
+                padding: 20px;
+            }
+            
+            .header-title {
+                font-size: 24px;
+            }
+            
+            .content-title {
+                font-size: 20px;
+            }
+            
+            .btn {
+                display: block;
+                width: 100%;
+            }
+            
+            .logo {
+                max-width: 140px;
+            }
+        }
+        
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background-color: #1a202c;
+            }
+            
+            .email-container {
+                background-color: #2d3748;
+            }
+            
+            .content-text {
+                color: #e2e8f0;
+            }
+            
+            .content-title {
+                color: #f7fafc;
+            }
+            
+            .info-card {
+                background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
+                border-color: #4a5568;
+            }
+            
+            .info-card-title,
+            .info-card-content {
+                color: #f7fafc;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <!-- Header -->
+        <div class="email-header">
+            <img src="{{ logo_url|default:'https://sunudash.netlify.app/logo.jpg' }}" alt="SUNU DASH" class="logo">
+            <h1 class="header-title">{{ header_title|default:"SUNU DASH" }}</h1>
+            <p class="header-subtitle">{{ header_subtitle|default:"Votre partenaire d'analyse d'assurance" }}</p>
+        </div>
+        
+        <!-- Contenu principal -->
+        <div class="email-content">
+            {% block content %}
+            <!-- Le contenu sera injecté ici -->
+            {% endblock %}
+        </div>
+        
+        <!-- Footer -->
+        <div class="email-footer">
+            <img src="{{ logo_url|default:'https://sunudash.netlify.app/logo.jpg' }}" alt="SUNU DASH" class="footer-logo">
+            <p class="footer-text">
+                <strong>SUNU DASH</strong><br>
+                Votre partenaire d'analyse d'assurance
+            </p>
+            <p class="footer-text">
+                Ce message est généré automatiquement. Merci de ne pas y répondre directement.
+            </p>
+            <div class="footer-links">
+                <a href="{{ frontend_url|default:'https://sunudash.netlify.app' }}" class="footer-link">Accéder à la plateforme</a>
+                <a href="mailto:support@sunudash.com" class="footer-link">Support</a>
+            </div>
+            <p class="footer-text" style="margin-top: 20px; font-size: 12px; color: #a0aec0;">
+                &copy; {{ current_year|default:"2024" }} SUNU DASH. Tous droits réservés.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

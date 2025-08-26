@@ -27,6 +27,12 @@ import pandas as pd
 from django.contrib.auth import get_user_model
 
 from .utils import generate_password, send_user_email
+from .email_service import EmailService
+from .tasks import (
+    send_credentials_email_task, 
+    send_country_assignment_email_task,
+    send_reset_password_email_task
+)
 
 class SuperuserCreateAPIView(APIView):
     """
@@ -113,12 +119,8 @@ class SuperuserCreateAPIView(APIView):
 
         # Send email with credentials
         try:
-            send_user_email(
-                to_email=email,
-                subject=subject,
-                plain_text_content=plain_text,
-                html_content=html_message
-            )
+            # Utiliser le service d'emails optimisé
+            EmailService.send_credentials_email(user, password, "Superutilisateur")
         except Exception as e:
             return Response({'detail': f'Utilisateur créé mais échec de l’envoi du mail : {str(e)}'}, status=status.HTTP_201_CREATED)
 
@@ -144,6 +146,13 @@ class LoginUserAPIView(APIView):
             if not user.is_active:
                 return Response({"error": "Votre compte a été désactivé. Veuillez contacter un administrateur."},
                                 status=status.HTTP_403_FORBIDDEN)
+
+            # Envoyer un email de confirmation de connexion (en arrière-plan)
+            try:
+                EmailService.send_login_success_email(user, request)
+            except Exception as e:
+                # Ne pas bloquer la connexion si l'email échoue
+                pass
 
             refresh = RefreshToken.for_user(user)
             return Response({
@@ -375,12 +384,8 @@ class PasswordResetConfirmView(APIView):
                 </html>
             """
 
-            send_user_email(
-                to_email=email,
-                subject=subject,
-                plain_text_content=plain_message,
-                html_content=html_message
-            )
+            # Utiliser le service d'emails optimisé
+            EmailService.send_credentials_email(user, password, "Administrateur Global")
 
             return Response({"message": "Votre mot de passe a été réinitialisé avec succès."}, status=status.HTTP_200_OK)
 
@@ -473,12 +478,8 @@ class CreateGlobalAdminView(APIView):
         """
 
         try:
-            send_user_email(
-                to_email=email,
-                subject='Votre compte Administrateur Global sur SUNU DASH a été créé',
-                plain_text_content=plain_message,
-                html_content=html_message
-            )
+            # Utiliser le service d'emails optimisé
+            EmailService.send_credentials_email(user, password, "Administrateur Global")
         except Exception as e:
             return Response({'detail': f'Utilisateur créé mais échec de l’envoi du mail : {str(e)}'}, status=status.HTTP_201_CREATED)
 
@@ -1212,7 +1213,8 @@ class UnassignOrReassignCountryView(APIView):
             </html>
             """
             try:
-                send_user_email(admin.email, subject, plain_text, html_message)
+                # Utiliser le service d'emails optimisé
+                EmailService.send_country_assignment_email(admin, country, "reassign")
             except Exception as e:
                 return Response({
                     "message": f"{admin.email} réassigné à {country.name}, mais l'email n'a pas pu être envoyé : {str(e)}"
@@ -1289,32 +1291,8 @@ class CreateUserByTerritorialAdmin(APIView):
             file.write(f'Username: {user.username}, Password: {password}\n')
 
         try:
-            send_mail(
-                f"Votre nouveau compte {role_labels.get(role, 'Utilisateur')} sur SUNU DASH",
-                f"Bonjour {user.first_name},\n\nVotre nom d'utilisateur est : {user.username}\nVotre mot de passe est : {password}\nVotre rôle sur la plateforme est : {role_labels.get(role, 'Utilisateur')}.\n\nMerci de changer votre mot de passe après votre première connexion.",
-                from_email,
-                [email],
-                fail_silently=False,
-                html_message=f"""
-                <html>
-                <body style='font-family: Arial, sans-serif; background: #f8f9fa; padding: 32px;'>
-                    <div style='max-width: 480px; margin: auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 32px;'>
-                        <h2 style='color: #2d5be3; margin-bottom: 12px;'>Bienvenue sur Sunu Dash !</h2>
-                        <p style='font-size: 16px; color: #222;'>Bonjour <strong>{user.first_name}</strong>,</p>
-                        <p style='font-size: 16px; color: #222;'>Votre compte <b>{role_labels.get(role, 'Utilisateur')}</b> a été créé avec succès. Voici vos identifiants&nbsp;:</p>
-                        <ul style='font-size: 16px; color: #222; list-style: none; padding: 0;'>
-                            <li><b>Nom d'utilisateur&nbsp;:</b> <span style='color: #2d5be3;'>{user.username}</span></li>
-                            <li><b>Mot de passe&nbsp;:</b> <span style='color: #2d5be3;'>{password}</span></li>
-                            <li><b>Rôle&nbsp;:</b> <span style='color: #2d5be3;'>{role_labels.get(role, 'Utilisateur')}</span></li>
-                        </ul>
-                        <p style='font-size: 15px; color: #444; margin-top: 20px;'>Merci de changer votre mot de passe après votre première connexion pour garantir la sécurité de votre compte.</p>
-                        <hr style='margin: 28px 0;'>
-                        <p style='font-size: 13px; color: #999;'>Ceci est un message automatique. Merci de ne pas répondre directement à cet email.</p>
-                    </div>
-                </body>
-                </html>
-                """
-            )
+            # Utiliser le service d'emails optimisé
+            EmailService.send_credentials_email(user, password, role_labels.get(role, 'Utilisateur'))
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
