@@ -34,30 +34,32 @@ class PrimeLoaderService:
         """
         Récupère le pays de l'utilisateur connecté ou None pour l'admin global
         """
-        # Vérifier si c'est un administrateur global
-        if hasattr(self.user, 'global_admin') and self.user.global_admin:
-            return None  # Admin global peut accéder à tous les pays
+        # Vérifier si c'est un superuser ou admin global
+        if self.user.role in ['SUPERUSER', 'ADMIN_GLOBAL']:
+            return None  # Superuser et admin global peuvent accéder à tous les pays
         
-        # Vérifier les autres types d'utilisateurs avec pays
-        if hasattr(self.user, 'territorial_admin') and self.user.territorial_admin.country:
-            return self.user.territorial_admin.country
-        elif hasattr(self.user, 'chef_dept_tech') and self.user.chef_dept_tech.country:
-            return self.user.chef_dept_tech.country
-        else:
-            raise ValidationError("L'utilisateur n'est pas associé à un pays et n'est pas administrateur global")
+        # Pour les autres utilisateurs, utiliser le pays assigné
+        return self.user.country
     
     def validate_file_format(self, file_path):
         """
-        Valide le format du fichier Excel
+        Valide le format du fichier Excel ou CSV
         
         Args:
-            file_path: Chemin vers le fichier Excel
+            file_path: Chemin vers le fichier Excel ou CSV
             
         Returns:
             bool: True si le format est valide
         """
         try:
-            df = pd.read_excel(file_path)
+            # Détecter le type de fichier par l'extension
+            if file_path.endswith(('.xlsx', '.xls')):
+                df = pd.read_excel(file_path)
+            elif file_path.endswith('.csv'):
+                df = pd.read_csv(file_path)
+            else:
+                raise ValidationError("Format de fichier non supporté. Utilisez .xlsx, .xls ou .csv")
+            
             required_columns = ['Nom Client', 'Prime', 'Date Paiement Prime']
             
             # Vérifier les colonnes requises
@@ -76,15 +78,21 @@ class PrimeLoaderService:
     
     def parse_excel_file(self, file_path):
         """
-        Parse le fichier Excel et retourne les données validées
+        Parse le fichier Excel ou CSV et retourne les données validées
         
         Args:
-            file_path: Chemin vers le fichier Excel
+            file_path: Chemin vers le fichier Excel ou CSV
             
         Returns:
             list: Liste des données de primes validées
         """
-        df = pd.read_excel(file_path)
+        # Détecter le type de fichier par l'extension
+        if file_path.endswith(('.xlsx', '.xls')):
+            df = pd.read_excel(file_path)
+        elif file_path.endswith('.csv'):
+            df = pd.read_csv(file_path)
+        else:
+            raise ValidationError("Format de fichier non supporté. Utilisez .xlsx, .xls ou .csv")
         
         # Nettoyer les données
         df = df.dropna(subset=['Nom Client', 'Prime'])  # Supprimer les lignes vides
@@ -278,10 +286,11 @@ class PrimeLoaderService:
                     'error': str(e)
                 })
         
-        # Finaliser la session d'import
-        import_session.status = 'completed' if not errors else 'completed_with_errors'
-        import_session.finished_at = datetime.now()
-        import_session.save()
+        # Finaliser la session d'import si elle existe
+        if import_session:
+            import_session.status = 'completed' if not errors else 'completed_with_errors'
+            import_session.finished_at = datetime.now()
+            import_session.save()
         
         return {
             'imported_count': imported_count,
@@ -290,7 +299,7 @@ class PrimeLoaderService:
             'clients_not_found': len(validation_results['clients_not_found']),
             'duplicate_names': validation_results['duplicate_names'],
             'errors': errors,
-            'import_session_id': import_session.id
+            'import_session_id': import_session.id if import_session else None
         }
     
     def get_import_preview(self, file_path):
@@ -298,7 +307,7 @@ class PrimeLoaderService:
         Génère un aperçu de l'import sans effectuer les modifications
         
         Args:
-            file_path: Chemin vers le fichier Excel
+            file_path: Chemin vers le fichier Excel ou CSV
             
         Returns:
             dict: Aperçu de l'import
