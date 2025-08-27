@@ -122,3 +122,4 @@ def cleanup_database_simple():
 
 if __name__ == "__main__":
     cleanup_database_simple()
+

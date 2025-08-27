@@ -15,7 +15,7 @@ from .services.policy_statistics import (
 from .services.partner_statistics import (GlobalPartnerStatisticsService, PartnerStatisticsService, GlobalPartnerListStatisticsService, CountryPartnerStatisticsService,
 CountryPartnerListStatisticsService, ClientPartnerStatisticsService, ClientPartnerListStatisticsService, PolicyPartnerStatisticsService, PolicyPartnerListStatisticsService
 )
-from .services.insured_statistics import CountryInsuredStatisticsService, CountryInsuredListService
+from .services.insured_statistics import CountryInsuredStatisticsService, CountryInsuredListService, PolicyInsuredStatisticsService, PolicyInsuredListService
 from .services.family_statistics import (
     CountryFamilyStatisticsService,
     CountryFamilyListService,
@@ -2310,6 +2310,161 @@ class ClientPolicyListStatisticsView(APIView):
             )
         except Exception as e:
             logger.error(f"Unexpected error in ClientPolicyListStatisticsView: {e}")
+            return Response(
+                {"error": "Une erreur inattendue s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class PolicyInsuredStatisticsView(APIView):
+    """
+    API endpoint to retrieve comprehensive statistics for insured members of a specific policy.
+    
+    This view provides detailed statistical data for insured members of a policy including:
+    - Insured role distribution (primary, spouse, child, other)
+    - Evolution timeline of insured members
+    - Consumption patterns by role over time
+    - Top consuming insured members ranking
+    - Detailed consumption patterns for each insured
+    
+    Method: POST
+    URL parameter: policy_id (int)
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD"
+        }
+    
+    Returns:
+        - 200 OK: Complete insured statistics with time series data
+        - 400 Bad Request: Invalid date parameters or policy not found
+        - 403 Forbidden: User not authorized or account disabled
+        - 500 Internal Server Error: System error during processing
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, policy_id):
+        """
+        Retrieve comprehensive statistics for insured members of a specific policy.
+        
+        This method processes date parameters, validates policy existence, and returns
+        formatted statistical data including time series for various insured metrics.
+        
+        Args:
+            request: HTTP request containing date_start and date_end in request.data
+            policy_id (int): ID of the policy to get insured statistics for
+            
+        Returns:
+            Response: Formatted insured statistical data with time series for frontend consumption
+        """
+        user = request.user
+        date_start = request.data.get('date_start')
+        date_end = request.data.get('date_end')
+        
+        if not request.user.is_active:
+            return Response(
+                {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération. Veuillez contacter votre administrateur hiérarchique."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if not (date_start and date_end):
+            return Response(
+                {"error": "date_start et date_end sont requis."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            service = PolicyInsuredStatisticsService(policy_id, date_start, date_end)
+            
+            statistics = service.get_complete_statistics()
+            
+            return Response(statistics, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in PolicyInsuredStatisticsView: {e}")
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in PolicyInsuredStatisticsView: {e}")
+            return Response(
+                {"error": "Une erreur inattendue s'est produite."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class PolicyInsuredListView(APIView):
+    """
+    API endpoint to retrieve detailed list of insured members for a specific policy.
+    
+    This view provides comprehensive information about insured members including:
+    - Personal details and role information
+    - Consumption statistics and patterns
+    - Claims history and reimbursement ratios
+    - Status and validity periods
+    
+    Method: POST
+    URL parameter: policy_id (int)
+    Request body:
+        {
+            "date_start": "YYYY-MM-DD",
+            "date_end": "YYYY-MM-DD"
+        }
+    
+    Returns:
+        - 200 OK: Complete insured list with detailed information
+        - 400 Bad Request: Invalid date parameters or policy not found
+        - 403 Forbidden: User not authorized or account disabled
+        - 500 Internal Server Error: System error during processing
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, policy_id):
+        """
+        Retrieve detailed list of insured members for a specific policy.
+        
+        This method processes date parameters, validates policy existence, and returns
+        formatted data including detailed information about each insured member.
+        
+        Args:
+            request: HTTP request containing date_start and date_end in request.data
+            policy_id (int): ID of the policy to get insured list for
+            
+        Returns:
+            Response: Formatted insured list data with detailed information for frontend consumption
+        """
+        user = request.user
+        date_start = request.data.get('date_start')
+        date_end = request.data.get('date_end')
+        
+        if not request.user.is_active:
+            return Response(
+                {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération. Veuillez contacter votre administrateur hiérarchique."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if not (date_start and date_end):
+            return Response(
+                {"error": "date_start et date_end sont requis."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            service = PolicyInsuredListService(policy_id, date_start, date_end)
+            
+            insured_list = service.get_complete_insureds_list()
+            
+            return Response(insured_list, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error in PolicyInsuredListView: {e}")
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in PolicyInsuredListView: {e}")
             return Response(
                 {"error": "Une erreur inattendue s'est produite."}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR

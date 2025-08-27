@@ -19,3 +19,4 @@ for i, name in enumerate(unique_clients, 1):
     print(f"{i}. {client.name} (ID: {client.id}, Pays: {client.country.name}, Prime: {client.prime or 'Aucune'})")
 
 print(f"\nTotal clients uniques trouvés: {len(unique_clients)}")
+

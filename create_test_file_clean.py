@@ -49,3 +49,4 @@ for i, name in enumerate(test_clients):
     client = Client.objects.filter(name=name).first()
     if client:
         print(f"- {name}: {client.prime or 'Aucune prime'}")
+

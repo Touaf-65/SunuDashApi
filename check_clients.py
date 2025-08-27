@@ -16,3 +16,4 @@ for i, client in enumerate(clients, 1):
     print(f"{i}. {client.name} (ID: {client.id}, Pays: {client.country.name})")
 
 print(f"\nTotal clients: {Client.objects.count()}")
+

@@ -339,3 +339,559 @@ class CountryInsuredListService:
                 }
             }
             
+
+class PolicyInsuredStatisticsService:
+    """
+    Service pour les statistiques détaillées des assurés d'une police spécifique.
+    Fournit des analyses granulaires sur les assurés, leur consommation et leur évolution.
+    """
+    def __init__(self, policy_id, date_start_str, date_end_str):
+        try:
+            self.policy_id = int(policy_id)
+            self.date_start, self.date_end = parse_date_range(date_start_str, date_end_str)
+            self.granularity = get_granularity(self.date_start, self.date_end)
+            self.trunc = get_trunc_function(self.granularity)
+            self._setup_base_filters()
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid parameters for PolicyInsuredStatisticsService: {e}")
+            raise ValidationError(f"Invalid parameters: {e}")
+
+    def _setup_base_filters(self):
+        try:
+            # Récupérer la police et vérifier son existence
+            self.policy = Policy.objects.select_related('client', 'client__country').get(id=self.policy_id)
+            
+            # Récupérer tous les assurés liés à cette police
+            self.insured_employers = InsuredEmployer.objects.filter(policy_id=self.policy_id)
+            self.insured_ids = list(self.insured_employers.values_list('insured_id', flat=True))
+            self.insureds = Insured.objects.filter(id__in=self.insured_ids)
+            
+            # Récupérer les claims pour cette police dans la période
+            self.claims = Claim.objects.select_related('invoice', 'insured').filter(
+                policy_id=self.policy_id,
+                settlement_date__range=(self.date_start, self.date_end),
+                invoice__isnull=False
+            )
+            
+            # Générer les périodes pour les séries temporelles
+            self.periods = generate_periods(self.date_start, self.date_end, self.granularity)
+            
+        except Policy.DoesNotExist:
+            raise ValidationError(f"Policy with ID {self.policy_id} does not exist")
+        except Exception as e:
+            logger.error(f"Error setting up base filters: {e}")
+            raise ValidationError(f"Error setting up filters: {e}")
+
+    def get_insured_role_distribution(self):
+        """
+        Obtient la répartition des assurés par rôle (principal, conjoint, enfant, autres).
+        
+        Returns:
+            dict: Répartition par rôle avec comptages
+        """
+        try:
+            role_distribution = {}
+            roles = ['primary', 'spouse', 'child', 'other']
+            
+            for role in roles:
+                if role == 'other':
+                    count = self.insured_employers.exclude(role__in=['primary', 'spouse', 'child']).count()
+                else:
+                    count = self.insured_employers.filter(role=role).count()
+                role_distribution[role] = count
+            
+            return role_distribution
+        except Exception as e:
+            logger.error(f"Error in get_insured_role_distribution: {e}")
+            return {}
+
+    def get_insured_evolution_timeline(self):
+        """
+        Obtient l'évolution du nombre d'assurés dans le temps pour cette police.
+        
+        Returns:
+            list: Série temporelle de l'évolution des assurés
+        """
+        try:
+            # Utiliser la date de création des liens InsuredEmployer comme proxy pour l'évolution
+            result = list(
+                self.insured_employers.annotate(period=self.trunc('creation_date'))
+                .values('period')
+                .annotate(value=Count('id'))
+                .order_by('period')
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_insured_evolution_timeline: {e}")
+            return []
+
+    def get_insured_consumption_by_role_series(self):
+        """
+        Obtient les séries temporelles de consommation par rôle d'assuré.
+        
+        Returns:
+            dict: Séries temporelles de consommation par rôle
+        """
+        try:
+            roles = ['primary', 'spouse', 'child', 'other']
+            consumption_by_role = {}
+            
+            for role in roles:
+                if role == 'other':
+                    # Pour les autres rôles, exclure primary, spouse, child
+                    role_insured_ids = list(
+                        self.insured_employers.exclude(role__in=['primary', 'spouse', 'child'])
+                        .values_list('insured_id', flat=True)
+                    )
+                else:
+                    role_insured_ids = list(
+                        self.insured_employers.filter(role=role)
+                        .values_list('insured_id', flat=True)
+                    )
+                
+                # Filtrer les claims par rôle
+                claims_role = self.claims.filter(insured_id__in=role_insured_ids)
+                
+                # Générer la série temporelle
+                result = list(
+                    claims_role.annotate(period=self.trunc('settlement_date'))
+                    .values('period')
+                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .order_by('period')
+                )
+                
+                # Convertir en float et nettoyer
+                for point in result:
+                    point['value'] = float(point['value'] or 0)
+                
+                consumption_by_role[role] = result
+            
+            return consumption_by_role
+        except Exception as e:
+            logger.error(f"Error in get_insured_consumption_by_role_series: {e}")
+            return {}
+
+    def get_top_insureds_consumption_ranking(self, limit=10):
+        """
+        Obtient le classement des assurés les plus consommateurs de cette police.
+        
+        Args:
+            limit (int): Nombre maximum d'assurés à retourner
+            
+        Returns:
+            list: Classement des assurés par consommation
+        """
+        try:
+            # Top assurés par consommation totale
+            top_insureds = list(
+                self.claims.values('insured_id')
+                .annotate(
+                    total_consumption=Sum('invoice__reimbursed_amount'),
+                    total_claimed=Sum('invoice__claimed_amount'),
+                    claims_count=Count('id')
+                )
+                .order_by('-total_consumption')[:limit]
+            )
+            
+            # Enrichir avec les informations des assurés
+            for insured_data in top_insureds:
+                insured_id = insured_data['insured_id']
+                insured = self.insureds.get(id=insured_id)
+                insured_employer = self.insured_employers.get(insured_id=insured_id)
+                
+                if insured and insured_employer:
+                    insured_data['insured_name'] = insured.name
+                    insured_data['role'] = insured_employer.get_role_display()
+                    insured_data['role_code'] = insured_employer.role
+                    insured_data['total_consumption'] = float(insured_data['total_consumption'] or 0)
+                    insured_data['total_claimed'] = float(insured_data['total_claimed'] or 0)
+                else:
+                    insured_data['insured_name'] = f"Assuré {insured_id}"
+                    insured_data['role'] = "Inconnu"
+                    insured_data['role_code'] = "unknown"
+            
+            return top_insureds
+        except Exception as e:
+            logger.error(f"Error in get_top_insureds_consumption_ranking: {e}")
+            return []
+
+    def get_insured_consumption_patterns(self):
+        """
+        Obtient les patterns de consommation par assuré avec des métriques détaillées.
+        
+        Returns:
+            dict: Patterns de consommation par assuré
+        """
+        try:
+            patterns = {}
+            
+            for insured_employer in self.insured_employers:
+                insured_id = insured_employer.insured_id
+                insured = insured_employer.insured
+                role = insured_employer.role
+                
+                # Claims pour cet assuré
+                insured_claims = self.claims.filter(insured_id=insured_id)
+                
+                # Calculer les métriques
+                total_consumption = insured_claims.aggregate(
+                    total=Sum('invoice__reimbursed_amount')
+                )['total'] or 0
+                
+                total_claimed = insured_claims.aggregate(
+                    total=Sum('invoice__claimed_amount')
+                )['total'] or 0
+                
+                claims_count = insured_claims.count()
+                
+                # Calculer le ratio de remboursement
+                reimbursement_ratio = 0
+                if total_claimed > 0:
+                    reimbursement_ratio = (total_consumption / total_claimed) * 100
+                
+                patterns[insured_id] = {
+                    'insured_name': insured.name,
+                    'role': insured_employer.get_role_display(),
+                    'role_code': role,
+                    'total_consumption': float(total_consumption),
+                    'total_claimed': float(total_claimed),
+                    'claims_count': claims_count,
+                    'reimbursement_ratio': round(reimbursement_ratio, 2),
+                    'average_consumption_per_claim': float(total_consumption / claims_count) if claims_count > 0 else 0
+                }
+            
+            return patterns
+        except Exception as e:
+            logger.error(f"Error in get_insured_consumption_patterns: {e}")
+            return {}
+
+    def get_complete_statistics(self):
+        """
+        Obtient toutes les statistiques complètes sur les assurés de cette police.
+        
+        Returns:
+            dict: Statistiques complètes formatées
+        """
+        try:
+            # Récupérer toutes les données
+            role_distribution = self.get_insured_role_distribution()
+            insured_evolution = self.get_insured_evolution_timeline()
+            consumption_by_role_series = self.get_insured_consumption_by_role_series()
+            top_insureds_ranking = self.get_top_insureds_consumption_ranking(10)
+            consumption_patterns = self.get_insured_consumption_patterns()
+            
+            # Calculer les valeurs actuelles
+            total_insured = sum(role_distribution.values())
+            total_consumption = sum(
+                pattern['total_consumption'] for pattern in consumption_patterns.values()
+            )
+            total_claimed = sum(
+                pattern['total_claimed'] for pattern in consumption_patterns.values()
+            )
+            
+            # Calculer le ratio S/P global
+            sp_ratio = 0
+            if total_consumption > 0:
+                sp_ratio = round((self.policy.client.prime / total_consumption) * 100, 2)
+            
+            # Formater les séries temporelles pour les graphiques
+            role_labels = {
+                'primary': 'Assuré principal',
+                'spouse': 'Conjoint(e)',
+                'child': 'Enfant',
+                'other': 'Autres assurés'
+            }
+            
+            consumption_by_role_formatted = format_series_for_multi_line_chart(
+                consumption_by_role_series, self.periods, self.granularity, role_labels
+            )
+            
+            return sanitize_float({
+                'policy': {
+                    'id': self.policy.id,
+                    'policy_number': self.policy.policy_number,
+                    'client_name': self.policy.client.name,
+                    'country_name': self.policy.client.country.name
+                },
+                'granularity': self.granularity,
+                'date_start': self.date_start.isoformat(),
+                'date_end': self.date_end.isoformat(),
+                
+                # Répartition des assurés
+                'insured_role_distribution': role_distribution,
+                'total_insured_count': total_insured,
+                
+                # Évolution temporelle
+                'insured_evolution_timeline': insured_evolution,
+                
+                # Consommation par rôle
+                'consumption_by_role_series': consumption_by_role_formatted,
+                'total_consumption': total_consumption,
+                'total_claimed': total_claimed,
+                'sp_ratio': sp_ratio,
+                
+                # Classements et patterns
+                'top_insureds_consumption_ranking': top_insureds_ranking,
+                'insured_consumption_patterns': consumption_patterns,
+                
+                # Métadonnées
+                'periods': [str(p) for p in self.periods]
+            })
+            
+        except Exception as e:
+            logger.error(f"Error in get_complete_statistics: {e}")
+            return {}
+
+    def get_complete_statistics(self):
+        """
+        Obtient toutes les statistiques complètes sur les assurés de cette police.
+        
+        Returns:
+            dict: Statistiques complètes formatées
+        """
+        try:
+            # Récupérer toutes les données
+            role_distribution = self.get_insured_role_distribution()
+            insured_evolution = self.get_insured_evolution_timeline()
+            consumption_by_role_series = self.get_insured_consumption_by_role_series()
+            top_insureds_ranking = self.get_top_insureds_consumption_ranking(10)
+            consumption_patterns = self.get_insured_consumption_patterns()
+            
+            # Calculer les valeurs actuelles
+            total_insured = sum(role_distribution.values())
+            total_consumption = sum(
+                pattern['total_consumption'] for pattern in consumption_patterns.values()
+            )
+            total_claimed = sum(
+                pattern['total_claimed'] for pattern in consumption_patterns.values()
+            )
+            
+            # Calculer le ratio S/P global
+            sp_ratio = 0
+            if total_consumption > 0:
+                sp_ratio = round((self.policy.client.prime / total_consumption) * 100, 2)
+            
+            # Formater les séries temporelles pour les graphiques
+            role_labels = {
+                'primary': 'Assuré principal',
+                'spouse': 'Conjoint(e)',
+                'child': 'Enfant',
+                'other': 'Autres assurés'
+            }
+            
+            consumption_by_role_formatted = format_series_for_multi_line_chart(
+                consumption_by_role_series, self.periods, self.granularity, role_labels
+            )
+            
+            return sanitize_float({
+                'policy': {
+                    'id': self.policy.id,
+                    'policy_number': self.policy.policy_number,
+                    'client_name': self.policy.client.name,
+                    'country_name': self.policy.client.country.name
+                },
+                'granularity': self.granularity,
+                'date_start': self.date_start.isoformat(),
+                'date_end': self.date_end.isoformat(),
+                
+                # Répartition des assurés
+                'insured_role_distribution': role_distribution,
+                'total_insured_count': total_insured,
+                
+                # Évolution temporelle
+                'insured_evolution_timeline': insured_evolution,
+                
+                # Consommation par rôle
+                'consumption_by_role_series': consumption_by_role_formatted,
+                'total_consumption': total_consumption,
+                'total_claimed': total_claimed,
+                'sp_ratio': sp_ratio,
+                
+                # Classements et patterns
+                'top_insureds_consumption_ranking': top_insureds_ranking,
+                'insured_consumption_patterns': consumption_patterns,
+                
+                # Métadonnées
+                'periods': [str(p) for p in self.periods]
+            })
+            
+        except Exception as e:
+            logger.error(f"Error in get_complete_statistics: {e}")
+            return {}
+
+
+class PolicyInsuredListService:
+    """
+    Service pour retourner la liste détaillée des assurés d'une police avec leurs statuts,
+    rôles et consommations.
+    """
+    def __init__(self, policy_id, date_start_str, date_end_str):
+        try:
+            self.policy_id = int(policy_id)
+            self.date_start, self.date_end = parse_date_range(date_start_str, date_end_str)
+            self._setup_base_filters()
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid parameters for PolicyInsuredListService: {e}")
+            raise ValidationError(f"Invalid parameters: {e}")
+
+    def _setup_base_filters(self):
+        try:
+            # Récupérer la police et vérifier son existence
+            self.policy = Policy.objects.select_related('client', 'client__country').get(id=self.policy_id)
+            
+            # Récupérer tous les assurés liés à cette police
+            self.insured_employers = InsuredEmployer.objects.filter(policy_id=self.policy_id)
+            self.insured_ids = list(self.insured_employers.values_list('insured_id', flat=True))
+            self.insureds = Insured.objects.filter(id__in=self.insured_ids)
+            
+            # Récupérer les claims pour cette police dans la période
+            self.claims = Claim.objects.select_related('invoice', 'insured').filter(
+                policy_id=self.policy_id,
+                settlement_date__range=(self.date_start, self.date_end),
+                invoice__isnull=False
+            )
+            
+        except Policy.DoesNotExist:
+            raise ValidationError(f"Policy with ID {self.policy_id} does not exist")
+        except Exception as e:
+            logger.error(f"Error setting up base filters: {e}")
+            raise ValidationError(f"Error setting up filters: {e}")
+
+    def get_insureds_detailed_list(self):
+        """
+        Retourne la liste détaillée des assurés avec leurs statuts et consommations.
+        
+        Returns:
+            list: Liste des assurés avec informations détaillées
+        """
+        try:
+            insureds_list = []
+            
+            for insured_employer in self.insured_employers:
+                insured_id = insured_employer.insured_id
+                insured = insured_employer.insured
+                
+                # Claims pour cet assuré
+                insured_claims = self.claims.filter(insured_id=insured_id)
+                
+                # Calculer les métriques de consommation
+                consumption_data = insured_claims.aggregate(
+                    total_consumption=Sum('invoice__reimbursed_amount'),
+                    total_claimed=Sum('invoice__claimed_amount'),
+                    claims_count=Count('id')
+                )
+                
+                total_consumption = float(consumption_data['total_consumption'] or 0)
+                total_claimed = float(consumption_data['total_claimed'] or 0)
+                claims_count = consumption_data['claims_count']
+                
+                # Calculer le ratio de remboursement
+                reimbursement_ratio = 0
+                if total_claimed > 0:
+                    reimbursement_ratio = round((total_consumption / total_claimed) * 100, 2)
+                
+                # Déterminer le nom de l'assuré principal de référence
+                primary_insured_name = "N/A"
+                if insured_employer.primary_insured_ref:
+                    primary_insured_name = insured_employer.primary_insured_ref.name
+                elif insured_employer.role == 'primary':
+                    primary_insured_name = insured.name
+                
+                # Déterminer le statut de l'assuré
+                insured_status = "Actif"
+                if insured_employer.end_date and insured_employer.end_date < self.date_end:
+                    insured_status = "Inactif"
+                
+                insured_data = {
+                    'insured_id': insured.id,
+                    'insured_name': insured.name,
+                    'role': insured_employer.get_role_display(),
+                    'role_code': insured_employer.role,
+                    'primary_insured_name': primary_insured_name,
+                    'insured_status': insured_status,
+                    'start_date': insured_employer.start_date.isoformat() if insured_employer.start_date else None,
+                    'end_date': insured_employer.end_date.isoformat() if insured_employer.end_date else None,
+                    
+                    # Métriques de consommation
+                    'total_consumption': total_consumption,
+                    'total_claimed': total_claimed,
+                    'claims_count': claims_count,
+                    'reimbursement_ratio': reimbursement_ratio,
+                    'average_consumption_per_claim': round(total_consumption / claims_count, 2) if claims_count > 0 else 0,
+                    
+                    # Informations sur la police
+                    'policy_number': self.policy.policy_number,
+                    'client_name': self.policy.client.name,
+                    'country_name': self.policy.client.country.name
+                }
+                
+                insureds_list.append(insured_data)
+            
+            # Trier par rôle puis par consommation
+            role_order = {'primary': 1, 'spouse': 2, 'child': 3, 'other': 4}
+            insureds_list.sort(key=lambda x: (role_order.get(x['role_code'], 5), -x['total_consumption']))
+            
+            return insureds_list
+            
+        except Exception as e:
+            logger.error(f"Error in get_insureds_detailed_list: {e}")
+            return []
+
+    def get_complete_insureds_list(self):
+        """
+        Retourne la liste complète avec métadonnées et résumé.
+        
+        Returns:
+            dict: Liste complète avec métadonnées
+        """
+        try:
+            insureds_list = self.get_insureds_detailed_list()
+            
+            # Calculer les totaux et moyennes
+            total_consumption = sum(item['total_consumption'] for item in insureds_list)
+            total_claimed = sum(item['total_claimed'] for item in insureds_list)
+            total_claims = sum(item['claims_count'] for item in insureds_list)
+            
+            # Répartition par rôle
+            role_distribution = {}
+            for item in insureds_list:
+                role = item['role_code']
+                if role not in role_distribution:
+                    role_distribution[role] = 0
+                role_distribution[role] += 1
+            
+            # Statistiques globales
+            summary_stats = {
+                'total_insured_count': len(insureds_list),
+                'total_consumption': total_consumption,
+                'total_claimed': total_claimed,
+                'total_claims_count': total_claims,
+                'average_consumption_per_insured': round(total_consumption / len(insureds_list), 2) if insureds_list else 0,
+                'average_consumption_per_claim': round(total_consumption / total_claims, 2) if total_claims > 0 else 0,
+                'global_reimbursement_ratio': round((total_consumption / total_claimed) * 100, 2) if total_claimed > 0 else 0,
+                'role_distribution': role_distribution
+            }
+            
+            return {
+                'insureds_list': insureds_list,
+                'summary_statistics': summary_stats,
+                'policy': {
+                    'id': self.policy.id,
+                    'policy_number': self.policy.policy_number,
+                    'client_name': self.policy.client.name,
+                    'country_name': self.policy.client.country.name
+                },
+                'date_start': self.date_start.isoformat(),
+                'date_end': self.date_end.isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in get_complete_insureds_list: {e}")
+            return {
+                'insureds_list': [],
+                'summary_statistics': {},
+                'policy': {},
+                'date_start': None,
+                'date_end': None
+            }
+            

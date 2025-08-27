@@ -53,3 +53,4 @@ print(f"\nPrimes actuelles des clients:")
 for i, name in enumerate(test_clients):
     client = Client.objects.filter(name=name).first()
     print(f"- {name}: {client.prime or 'Aucune prime'}")
+

@@ -136,3 +136,4 @@ def cleanup_database_auto():
 
 if __name__ == "__main__":
     cleanup_database_auto()
+
