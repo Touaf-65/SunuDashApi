@@ -177,7 +177,8 @@ AUTHENTICATION_BACKENDS = [
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        # JWT + gel des comptes rattachés à un pays désactivé
+        'users.authentication.ActiveCountryJWTAuthentication',
     )
 }
 

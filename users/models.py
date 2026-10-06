@@ -78,7 +78,22 @@ class CustomUser(AbstractUser, PermissionsMixin):
         return self.role == self.Roles.CHEF_DEPT_TECH
 
     def is_responsable_operateur(self):
-        return self.role == self.Roles.RESPONSABLE_OPERATEUR
+        return self.role == self.Roles.RESP_OPERATEUR
+
+    # Rôles dont l'activité dépend du pays de rattachement
+    COUNTRY_BOUND_ROLES = (Roles.ADMIN_TERRITORIAL, Roles.CHEF_DEPT_TECH, Roles.RESP_OPERATEUR)
+
+    def has_inactive_country(self):
+        """
+        True si le compte dépend d'un pays (admin territorial, chef dept, opérateur)
+        et que ce pays est désactivé : le compte est alors gelé tant que le pays
+        n'est pas restauré.
+        """
+        return (
+            self.role in self.COUNTRY_BOUND_ROLES
+            and self.country_id is not None
+            and not self.country.is_active
+        )
 
 
 class PasswordResetToken(models.Model):

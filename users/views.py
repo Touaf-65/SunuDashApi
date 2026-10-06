@@ -30,6 +30,7 @@ from django.contrib.auth import get_user_model
 
 from .utils import generate_password, send_user_email, read_import_file
 from .email_service import EmailService
+from .authentication import INACTIVE_COUNTRY_MESSAGE
 from .tasks import (
     send_credentials_email_task, 
     send_country_assignment_email_task,
@@ -124,6 +125,10 @@ class LoginUserAPIView(APIView):
             if not user.is_active:
                 return Response({"error": "Votre compte a été désactivé. Veuillez contacter un administrateur."},
                                 status=status.HTTP_403_FORBIDDEN)
+
+            # Compte gelé : rattaché à un pays désactivé
+            if user.has_inactive_country():
+                return Response({"error": INACTIVE_COUNTRY_MESSAGE}, status=status.HTTP_403_FORBIDDEN)
 
             # Envoyer un email de confirmation de connexion (en arrière-plan)
             try:
@@ -1010,6 +1015,10 @@ class AssignCountryToTerritorialAdminView(APIView):
         except Country.DoesNotExist:
             return Response({"error": "Pays introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
+        if not country.is_active:
+            return Response({"error": f"Le pays {country.name} est désactivé : impossible d'y affecter un administrateur."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
         admin.country = country
         admin.save()
 
@@ -1124,6 +1133,10 @@ class UnassignOrReassignCountryView(APIView):
 
             if admin.country == country:
                 return Response({"error": f"{admin.email} est déjà assigné à ce pays."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if not country.is_active:
+                return Response({"error": f"Le pays {country.name} est désactivé : impossible d'y affecter un administrateur."},
+                                status=status.HTTP_400_BAD_REQUEST)
 
             admin.country = country
             admin.save()
