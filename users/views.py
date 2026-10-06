@@ -39,6 +39,10 @@ from .tasks import (
 logger = logging.getLogger(__name__)
 
 
+class CredentialsEmailError(Exception):
+    """The credentials email of a newly created account could not be sent."""
+
+
 class SuperuserCreateAPIView(APIView):
     """
     API to create the first superuser.
@@ -405,10 +409,10 @@ class CreateGlobalAdminView(APIView):
     Required fields: first_name, last_name, email
 
     Responses:
-        - 201 Created: Admin successfully created
-        - 200 OK: Admin already exists or email is taken
+        - 201 Created: Admin successfully created and credentials emailed
         - 400 Bad Request: Missing or invalid fields
-        - 500 Internal Server Error: Email logging or sending failed
+        - 409 Conflict: A user with this email already exists
+        - 503 Service Unavailable: Credentials email could not be sent (account not created)
     """
     permission_classes = [IsAuthenticated, IsSuperUser]
 
@@ -432,61 +436,36 @@ class CreateGlobalAdminView(APIView):
 
         password = generate_password(length=8)
 
+        # Create the account and send its credentials atomically: if the email cannot be
+        # sent, the account is rolled back so no one ends up unable to log in.
         try:
-            user = CustomUser.objects.create_user(
-                first_name=first_name,
-                last_name=last_name,
-                email=email,
-                password=password,
-                is_staff=True
+            with transaction.atomic():
+                user = CustomUser.objects.create_user(
+                    first_name=first_name,
+                    last_name=last_name,
+                    email=email,
+                    password=password,
+                    is_staff=True,
+                    role=CustomUser.Roles.ADMIN_GLOBAL,
+                )
+                # EmailService catches SMTP errors itself and returns False
+                if not EmailService.send_credentials_email(user, password, "Administrateur Global"):
+                    raise CredentialsEmailError()
+        except CredentialsEmailError:
+            return Response(
+                {'error': "Le compte n'a pas été créé : l'e-mail d'identifiants n'a pas pu être envoyé. Réessayez plus tard."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
-            user.role = CustomUser.Roles.ADMIN_GLOBAL
-            user.save()
         except Exception as e:
             return Response({'error': f"Échec de la création de l'utilisateur : {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Log credentials to file
+        # Log credentials to file (internal backup) — must not fail the request
         try:
             file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'global_users.txt')
             with open(file_path, 'a') as file:
                 file.write(f'Username: {user.username}, Password: {password}\n')
         except Exception as e:
-            return Response({'error': f"Échec de l'enregistrement des identifiants : {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        # Prepare and send email
-        subject = 'Votre nouveau compte Administrateur Global'
-        plain_message = (
-            f"Bonjour {user.first_name},\n\n"
-            f"Votre nom d'utilisateur est : {user.username}\n"
-            f"Votre mot de passe est : {password}\n"
-            f"Votre rôle sur la plateforme est : Administrateur Global.\n\n"
-            f"Merci de changer votre mot de passe après votre première connexion."
-        )
-        html_message = f"""
-            <html>
-            <body style='font-family: Arial, sans-serif; background: #f8f9fa; padding: 32px;'>
-                <div style='max-width: 480px; margin: auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 32px;'>
-                    <h2 style='color: #2d5be3; margin-bottom: 12px;'>Bienvenue sur Sunu Dash !</h2>
-                    <p style='font-size: 16px; color: #222;'>Bonjour <strong>{user.first_name}</strong>,</p>
-                    <p style='font-size: 16px; color: #222;'>Votre compte <b>Administrateur Global</b> a été créé avec succès. Voici vos identifiants&nbsp;:</p>
-                    <ul style='font-size: 16px; color: #222; list-style: none; padding: 0;'>
-                        <li><b>Nom d'utilisateur&nbsp;:</b> <span style='color: #2d5be3;'>{user.username}</span></li>
-                        <li><b>Mot de passe&nbsp;:</b> <span style='color: #2d5be3;'>{password}</span></li>
-                        <li><b>Rôle&nbsp;:</b> <span style='color: #2d5be3;'>Administrateur Global</span></li>
-                    </ul>
-                    <p style='font-size: 15px; color: #444; margin-top: 20px;'>Merci de changer votre mot de passe après votre première connexion pour garantir la sécurité de votre compte.</p>
-                    <hr style='margin: 28px 0;'>
-                    <p style='font-size: 13px; color: #999;'>Ceci est un message automatique. Merci de ne pas répondre directement à cet email.</p>
-                </div>
-            </body>
-            </html>
-        """
-
-        try:
-            # Utiliser le service d'emails optimisé
-            EmailService.send_credentials_email(user, password, "Administrateur Global")
-        except Exception as e:
-            return Response({'detail': f'Utilisateur créé mais échec de l’envoi du mail : {str(e)}'}, status=status.HTTP_201_CREATED)
+            logger.warning("Création admin global : impossible d'écrire le fichier d'identifiants : %s", e)
 
         return Response(
             {"message": "Administrateur Global créé avec succès. Un email contenant les informations de connexion a été envoyé."},
@@ -753,31 +732,53 @@ class CreateTerritorialAdminView(APIView):
 
             password = generate_password(length=8)
 
+            # Create the account and send its credentials atomically: if the email cannot be
+            # sent, the account is rolled back so no one ends up unable to log in.
             try:
-                user = CustomUser.objects.create_user(
-                    first_name=first_name,
-                    last_name=last_name,
-                    email=email,
-                    password=password,
-                    is_staff=True
+                with transaction.atomic():
+                    user = CustomUser.objects.create_user(
+                        first_name=first_name,
+                        last_name=last_name,
+                        email=email,
+                        password=password,
+                        is_staff=True,
+                        role=CustomUser.Roles.ADMIN_TERRITORIAL,
+                    )
+                    try:
+                        self._send_credentials_email(user, password)
+                    except Exception as e:
+                        raise CredentialsEmailError() from e
+            except CredentialsEmailError as e:
+                logger.warning("Création admin territorial : compte non créé pour %s (échec envoi e-mail : %s)", email, e.__cause__)
+                return Response(
+                    {'error': "Le compte n'a pas été créé : l'e-mail d'identifiants n'a pas pu être envoyé. Réessayez plus tard."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
                 )
-                user.role = CustomUser.Roles.ADMIN_TERRITORIAL
-                user.save()
             except Exception as e:
                 return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-            file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'territorial_users.txt')
-            with open(file_path, 'a') as file:
-                file.write(f'Username: {user.username}, Password: {password}\n')
+            # Log credentials to file (internal backup) — must not fail the request
+            try:
+                file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'territorial_users.txt')
+                with open(file_path, 'a') as file:
+                    file.write(f'Username: {user.username}, Password: {password}\n')
+            except Exception as e:
+                logger.warning("Création admin territorial : impossible d'écrire le fichier d'identifiants : %s", e)
 
-            subject =  'Votre nouveau compte Administrateur Territorial surr SUNU DASH a été créé'
+            return Response({'detail': 'Administrateur Territorial créé avec succès. Identifiants envoyés par email.'}, status=status.HTTP_201_CREATED)
+
+        return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+
+    @staticmethod
+    def _send_credentials_email(user, password):
+            subject =  'Votre nouveau compte Administrateur Territorial sur SUNU DASH a été créé'
 
             plain_text = f"""
             Bonjour {user.first_name},
 
             Votre nom d'utilisateur est : {user.username}
             Votre mot de passe est : {password}
-            Votre rôle sur la plateforme est : Superutilisateur.
+            Votre rôle sur la plateforme est : Administrateur Territorial.
 
             Merci de changer votre mot de passe après votre première connexion pour garantir la sécurité de votre compte.
             """
@@ -801,19 +802,12 @@ class CreateTerritorialAdminView(APIView):
                 </body>
                 </html>
             """
-            try:
-                send_user_email(
-                    to_email=email,
-                    subject=subject,
-                    plain_text_content=plain_text,
-                    html_content=html_message
-                )
-            except Exception as e:
-                return Response({'detail': f'Utilisateur créé mais échec de l’envoi du mail : {str(e)}'}, status=status.HTTP_201_CREATED)
-
-            return Response({'detail': 'Administrateur Territorial créé avec succès. Identifiants envoyés par email.'}, status=status.HTTP_201_CREATED)
-
-        return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+            send_user_email(
+                to_email=user.email,
+                subject=subject,
+                plain_text_content=plain_text,
+                html_content=html_message
+            )
 
 
 class CreateTerritorialAdminsFromExcel(APIView):
