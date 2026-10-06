@@ -202,9 +202,11 @@ class VerifyPassword(APIView):
         }
 
     Returns:
-        - 200 OK with True if the password is correct.
-        - 401 Unauthorized with False if the password is incorrect.
+        - 200 OK with True if the password is correct, False otherwise.
+          A wrong password must not answer 401: the session is valid, and the
+          frontend logs the user out on any 401.
         - 400 Bad Request if password is missing.
+        - 401 Unauthorized only if the user is not authenticated.
     """
     permission_classes = [IsAuthenticated]
 
@@ -214,12 +216,7 @@ class VerifyPassword(APIView):
         if not password:
             return Response({'error': 'Password is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = request.user
-
-        if user.check_password(password):
-            return Response(True, status=status.HTTP_200_OK)
-        else:
-            return Response(False, status=status.HTTP_401_UNAUTHORIZED)
+        return Response(request.user.check_password(password), status=status.HTTP_200_OK)
 
 
 class PasswordResetRequestView(APIView):
