@@ -42,7 +42,10 @@ def read_import_file(file):
             separator = ','
         df = pd.read_csv(io.StringIO(text), sep=separator, dtype=str, skipinitialspace=True)
     elif name.endswith(('.xlsx', '.xls')):
-        df = pd.read_excel(file)
+        try:
+            df = pd.read_excel(file)  # .xlsx via openpyxl, .xls via xlrd
+        except Exception as e:
+            raise ValueError("fichier Excel illisible ou corrompu") from e
     else:
         raise ValueError(f"format non pris en charge (formats acceptés : {ACCEPTED_IMPORT_FORMATS})")
 
