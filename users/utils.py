@@ -1,7 +1,53 @@
+import csv
+import io
 import random
 import string
+
+import pandas as pd
 from django.core.mail import send_mail
 from django.conf import settings
+
+ACCEPTED_IMPORT_FORMATS = ".xlsx, .xls, .csv"
+
+
+def read_import_file(file):
+    """
+    Read an uploaded user import file (.xlsx, .xls or .csv) into a DataFrame.
+
+    CSV files are decoded as UTF-8 (with or without BOM) and fall back to Windows-1252,
+    the encoding of CSV files saved by a French Excel. The separator (';', ',' or tab)
+    is detected automatically: French Excel uses ';'. Empty cells are read as NaN,
+    like with Excel files, and column names are stripped of surrounding spaces.
+
+    Raises:
+        ValueError: unsupported extension or unreadable file.
+    """
+    name = (getattr(file, 'name', '') or '').lower()
+
+    if name.endswith('.csv'):
+        raw = file.read()
+        for encoding in ('utf-8-sig', 'cp1252'):
+            try:
+                text = raw.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            raise ValueError("encodage du fichier CSV non reconnu")
+        if not text.strip():
+            raise ValueError("le fichier CSV est vide")
+        try:
+            separator = csv.Sniffer().sniff(text.splitlines()[0], delimiters=';,\t').delimiter
+        except csv.Error:
+            separator = ','
+        df = pd.read_csv(io.StringIO(text), sep=separator, dtype=str, skipinitialspace=True)
+    elif name.endswith(('.xlsx', '.xls')):
+        df = pd.read_excel(file)
+    else:
+        raise ValueError(f"format non pris en charge (formats acceptés : {ACCEPTED_IMPORT_FORMATS})")
+
+    df.columns = [str(column).strip() for column in df.columns]
+    return df
 
 def generate_password(length=12):
     """

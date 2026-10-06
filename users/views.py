@@ -28,7 +28,7 @@ from django.db import transaction
 
 from django.contrib.auth import get_user_model
 
-from .utils import generate_password, send_user_email
+from .utils import generate_password, send_user_email, read_import_file
 from .email_service import EmailService
 from .tasks import (
     send_credentials_email_task, 
@@ -450,9 +450,9 @@ class CreateAdminGlobalFromFileView(APIView):
             return Response({"detail": "Aucun fichier fourni."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            df = pd.read_excel(file)
-        except Exception:
-            return Response({"detail": "Fichier Excel invalide."}, status=status.HTTP_400_BAD_REQUEST)
+            df = read_import_file(file)
+        except Exception as e:
+            return Response({"detail": f"Fichier invalide : {e}"}, status=status.HTTP_400_BAD_REQUEST)
 
         required_columns = ['first_name', 'last_name', 'email']
         if not all(col in df.columns for col in required_columns):
@@ -770,9 +770,9 @@ class CreateTerritorialAdminsFromExcel(APIView):
             return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            df = pd.read_excel(file)
+            df = read_import_file(file)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': f"Fichier invalide : {e}"}, status=status.HTTP_400_BAD_REQUEST)
 
         required_headers = ['firstname', 'lastname', 'email']
         if not all(header in df.columns for header in required_headers):
@@ -1255,9 +1255,9 @@ class CreateUsersByTerritorialAdminFromExcel(APIView):
             return Response({'erreur': 'Aucun fichier fourni.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            df = pd.read_excel(file)
+            df = read_import_file(file)
         except Exception as e:
-            return Response({'erreur': f'Fichier Excel invalide : {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'erreur': f'Fichier invalide : {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
         required_headers = ['firstname', 'lastname', 'email', 'role']
         if not all(header in df.columns for header in required_headers):
