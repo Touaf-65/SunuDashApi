@@ -48,7 +48,7 @@ class CreateCountryView(APIView):
 
         serializer = CountrySerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save(name=name.title(), code=code)
+            serializer.save()  # nom nettoyé et code en majuscules par le serializer
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -104,7 +104,7 @@ class CreateCountryFromExcel(APIView):
                 skipped_rows.append({'row': line, 'reason': f"Un pays de code « {code} » existe déjà."})
                 continue
 
-            data = {'name': name.title(), 'code': code}
+            data = {'name': name, 'code': code}  # nom nettoyé par le serializer
             # Empty currency cells keep the model defaults (XOF / F CFA)
             if cell(row, 'currency_code'):
                 data['currency_code'] = cell(row, 'currency_code')

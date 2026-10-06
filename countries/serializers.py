@@ -1,6 +1,17 @@
 from rest_framework import serializers
 from .models import Country
 
+
+def clean_label(value):
+    """
+    Nettoie un libellé saisi (nom de pays, de devise) sans en changer la casse :
+    espaces superflus retirés, première lettre en majuscule. Contrairement à
+    str.title(), « Côte d'Ivoire » et « F CFA » restent intacts.
+    """
+    value = " ".join(value.split())
+    return value[:1].upper() + value[1:]
+
+
 class CountrySerializer(serializers.ModelSerializer):
     class Meta:
         model = Country
@@ -29,7 +40,7 @@ class CountrySerializer(serializers.ModelSerializer):
         unique de la base est sensible à la casse et ne suffit pas. Le pays modifié
         est exclu, pour pouvoir changer la casse de son propre nom.
         """
-        value = value.strip()
+        value = clean_label(value)
         if not value:
             raise serializers.ValidationError("Le nom du pays est requis.")
         duplicates = Country.objects.filter(name__iexact=value)
@@ -56,4 +67,4 @@ class CountrySerializer(serializers.ModelSerializer):
         return value.upper()
 
     def validate_currency_name(self, value):
-        return value.strip().title() if value else value
+        return clean_label(value) if value else value
