@@ -1482,7 +1482,11 @@ class SimpleUserUpdateView(APIView, SimpleUserMixin):
         if not user:
             return Response({"error": "Utilisateur non trouvé."}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = UserSerializer(user, data=request.data, partial=True)
+        # Un admin territorial peut passer un utilisateur de son pays d'un rôle simple à l'autre
+        serializer = UserSerializer(
+            user, data=request.data, partial=True,
+            context={'assignable_roles': (CustomUser.Roles.CHEF_DEPT_TECH, CustomUser.Roles.RESP_OPERATEUR)},
+        )
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)

@@ -19,17 +19,32 @@ class UserSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ('username',)
 
+    def validate_role(self, value):
+        """
+        Un changement de rôle n'est accepté que si la vue l'autorise explicitement via
+        context['assignable_roles'] ; par défaut, le rôle ne peut pas être modifié.
+        Renvoyer le rôle actuel reste accepté (formulaires qui renvoient tous les champs).
+        """
+        current_role = self.instance.role if self.instance else None
+        if value == current_role:
+            return value
+        if value not in self.context.get('assignable_roles', ()):
+            raise serializers.ValidationError("Vous n'êtes pas autorisé à attribuer ce rôle.")
+        return value
+
     def validate(self, data):
-        role = data.get('role', None)
-        country = data.get('country', None)
+        if 'role' not in data:
+            return data
 
         roles_requiring_country = [
             CustomUser.Roles.ADMIN_TERRITORIAL,
             CustomUser.Roles.CHEF_DEPT_TECH,
             CustomUser.Roles.RESP_OPERATEUR,
         ]
+        # 'country' est en lecture seule : on vérifie le pays déjà enregistré du compte
+        country = getattr(self.instance, 'country', None)
 
-        if role in roles_requiring_country and not country:
+        if data['role'] in roles_requiring_country and not country:
             raise serializers.ValidationError({
                 "country": "Ce champ est requis pour le rôle sélectionné."
             })
