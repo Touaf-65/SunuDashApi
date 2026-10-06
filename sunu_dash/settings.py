@@ -1,20 +1,36 @@
+import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Charge le fichier .env local s'il existe (en production, les variables
+# sont définies directement dans l'environnement, ex. dashboard Render).
+load_dotenv(BASE_DIR / ".env")
 
-# Quick-start development settings - unsuitable for production
+
+def env_bool(name, default=False):
+    return os.environ.get(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
+
+
+def env_list(name, default=""):
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
+
+
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-b(b)a@y8aqtlh_7ldbjsf*n%2az=6%1tog%py2dm5t-(0qiyx#"
-
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env_bool("DJANGO_DEBUG", False)
 
-ALLOWED_HOSTS = ['sunudashapi.onrender.com', '127.0.0.1', 'localhost']
-# ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+if not SECRET_KEY:
+    raise ImproperlyConfigured("La variable d'environnement DJANGO_SECRET_KEY doit être définie.")
+
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "sunudashapi.onrender.com,127.0.0.1,localhost")
 
 
 # Application definition
@@ -50,11 +66,10 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
 ]
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:4200",  # URL du frontend Angular
-    "https://sunudashapi.onrender.com",
-    "https://sunudash.netlify.app"
-]
+CORS_ALLOWED_ORIGINS = env_list(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:4200,https://sunudashapi.onrender.com,https://sunudash.netlify.app",
+)
 
 ROOT_URLCONF = "sunu_dash.urls"
 
@@ -137,18 +152,18 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Config sending Email Settings
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'alexamevor17@gmail.com'
-EMAIL_HOST_PASSWORD = 'mbxx mgkl dzpe ebli'
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = env_bool('EMAIL_USE_TLS', True)
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 
 # Optimisations pour l'envoi rapide d'emails
 EMAIL_TIMEOUT = 10  # Timeout de 10 secondes
 EMAIL_USE_LOCALTIME = True
 
 # URL du frontend pour les liens dans les emails
-FRONTEND_URL = 'https://sunudash.netlify.app'
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://sunudash.netlify.app')
 
 AUTHENTICATION_BACKENDS = [
     'users.backends.UsernameOrEmailBackend',
@@ -171,7 +186,7 @@ SIMPLE_JWT = {
 }
 
 
-CELERY_BROKER_URL = 'redis://localhost:6379/0' 
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 

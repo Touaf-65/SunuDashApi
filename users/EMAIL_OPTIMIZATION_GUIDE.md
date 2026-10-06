@@ -153,11 +153,11 @@ EmailService.send_reset_password_email(user, otp, expire_at)
 ```python
 # Dans settings.py
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'alexamevor17@gmail.com'
-EMAIL_HOST_PASSWORD = 'mbxx mgkl dzpe ebli'
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = env_bool('EMAIL_USE_TLS', True)
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 
 # Optimisations supplémentaires
 EMAIL_TIMEOUT = 10  # Timeout de 10 secondes
@@ -200,8 +200,8 @@ logger.error(f"Erreur envoi email à {user.email}: {str(e)}")
 ```bash
 # Ajouter dans .env
 FRONTEND_URL=https://sunudash.netlify.app
-EMAIL_HOST_USER=alexamevor17@gmail.com
-EMAIL_HOST_PASSWORD=mbxx mgkl dzpe ebli
+EMAIL_HOST_USER=<adresse-gmail>
+EMAIL_HOST_PASSWORD=<mot-de-passe-d-application>
 ```
 
 ### **2. Configuration Celery**

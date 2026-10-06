@@ -12,3 +12,7 @@ dashboard/POLICY_STATISTICS_SERVICES.md
 dashboard/POLICY_SERVICES_RESTRUCTURING.md
 
 venv
+.venv/
+__pycache__/
+*.pyc
+.env
