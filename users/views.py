@@ -839,82 +839,72 @@ class CreateTerritorialAdminsFromExcel(APIView):
         if not all(header in df.columns for header in required_headers):
             return Response({'error': 'Missing required headers in the Excel file'}, status=status.HTTP_400_BAD_REQUEST)
 
-        created_users = []
+        created_count = 0
+        ignored_count = 0
+        failed_emails = []
 
         for _, row in df.iterrows():
             first_name = str(row['firstname']).strip()
             last_name = str(row['lastname']).strip()
             email = str(row['email']).strip().lower()
 
-            if not email or CustomUser.objects.filter(email=email).exists():
+            # Skip invalid emails and rows without first or last name (empty cells are read as NaN)
+            try:
+                validate_email(email)
+            except ValidationError:
+                ignored_count += 1
+                continue
+            if pd.isna(row['firstname']) or pd.isna(row['lastname']) or not first_name or not last_name:
+                ignored_count += 1
                 continue
 
-            password = generate_password(length=8)   
+            if CustomUser.objects.filter(email=email).exists():
+                ignored_count += 1
+                continue
 
+            # Create user and send credentials atomically: if the email fails, the account
+            # is rolled back so no one ends up with an account they cannot log into.
+            password = generate_password(length=8)
             try:
-                user = CustomUser.objects.create_user(
-                    first_name=first_name,
-                    last_name=last_name,
-                    email=email,
-                    password=password,
-                    is_staff=True,
-                )
-                user.role = CustomUser.Roles.ADMIN_TERRITORIAL
-                user.save()
+                with transaction.atomic():
+                    user = CustomUser.objects.create_user(
+                        first_name=first_name,
+                        last_name=last_name,
+                        email=email,
+                        password=password,
+                        is_staff=True,
+                        role=CustomUser.Roles.ADMIN_TERRITORIAL,
+                    )
+                    CreateTerritorialAdminView._send_credentials_email(user, password)
+            except Exception as e:
+                logger.warning("Import admin territorial : compte non créé pour %s (échec envoi e-mail : %s)", email, e)
+                failed_emails.append(email)
+                continue
 
-                created_users.append(user)
+            created_count += 1
 
+            # Log credentials to file (for internal auditing or backup) — must not abort the import
+            try:
                 file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'territorial_users.txt')
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 with open(file_path, 'a') as f:
                     f.write(f'Username: {user.username}, Password: {password}\n')
-
-                subject =  'Votre nouveau compte Administrateur Territorial surr SUNU DASH a été créé'
-
-                plain_text = f"""
-                Bonjour {user.first_name},
-
-                Votre nom d'utilisateur est : {user.username}
-                Votre mot de passe est : {password}
-                Votre rôle sur la plateforme est : Superutilisateur.
-
-                Merci de changer votre mot de passe après votre première connexion pour garantir la sécurité de votre compte.
-                """
-
-                html_message=f"""
-                    <html>
-                    <body style='font-family: Arial, sans-serif; background: #f8f9fa; padding: 32px;'>
-                        <div style='max-width: 480px; margin: auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 32px;'>
-                            <h2 style='color: #2d5be3; margin-bottom: 12px;'>Bienvenue sur Sunu Dash !</h2>
-                            <p style='font-size: 16px; color: #222;'>Bonjour <strong>{user.first_name}</strong>,</p>
-                            <p style='font-size: 16px; color: #222;'>Votre compte <b>Administrateur Territorial</b> a été créé avec succès. Voici vos identifiants&nbsp;:</p>
-                            <ul style='font-size: 16px; color: #222; list-style: none; padding: 0;'>
-                                <li><b>Nom d'utilisateur&nbsp;:</b> <span style='color: #2d5be3;'>{user.username}</span></li>
-                                <li><b>Mot de passe&nbsp;:</b> <span style='color: #2d5be3;'>{password}</span></li>
-                                <li><b>Rôle&nbsp;:</b> <span style='color: #2d5be3;'>Administrateur Territorial</span></li>                            
-                            </ul>
-                            <p style='font-size: 15px; color: #444; margin-top: 20px;'>Merci de changer votre mot de passe après votre première connexion pour garantir la sécurité de votre compte.</p>
-                            <hr style='margin: 28px 0;'>
-                            <p style='font-size: 13px; color: #999;'>Ceci est un message automatique. Merci de ne pas répondre directement à cet email.</p>
-                        </div>
-                    </body>
-                    </html>
-                """
-                try:
-                    send_user_email(
-                        to_email=email,
-                        subject=subject,
-                        plain_text_content=plain_text,
-                        html_content=html_message
-                    )
-                except Exception as e:
-                    return Response({'detail': f'Utilisateur créé mais échec de l’envoi du mail : {str(e)}'}, status=status.HTTP_201_CREATED)
-
-                return Response({'detail': 'Administrateur Territorial créé avec succès. Identifiants envoyés par email.'}, status=status.HTTP_201_CREATED)
             except Exception as e:
-                return Response({'error': f"Error creating user {email}: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+                logger.warning("Import admin territorial : impossible d'écrire le fichier d'identifiants : %s", e)
 
-        return Response({'message': f'{len(created_users)} territorial admins created successfully.'}, status=status.HTTP_201_CREATED)
+        message = f"{created_count} administrateur(s) territorial(aux) créé(s) avec succès."
+        if failed_emails:
+            message += (f" {len(failed_emails)} compte(s) non créé(s) car l'e-mail d'identifiants "
+                        f"n'a pas pu être envoyé : {', '.join(failed_emails)}.")
+        return Response(
+            {
+                'message': message,
+                'created_count': created_count,
+                'lignes_ignores': ignored_count,
+                'echecs_envoi_email': failed_emails,
+            },
+            status=status.HTTP_201_CREATED
+        )
 
 
 class TerritorialAdminListView(APIView):
@@ -1283,30 +1273,37 @@ class CreateUserByTerritorialAdmin(APIView):
 
         password = generate_password(length=8)
 
+        # Create the account and send its credentials atomically: if the email cannot be
+        # sent, the account is rolled back so no one ends up unable to log in.
         try:
-            user = CustomUser.objects.create_user(
-                first_name=first_name,
-                last_name=last_name,
-                email=email,
-                password=password,
-                country=request.user.country,
-                role=role
+            with transaction.atomic():
+                user = CustomUser.objects.create_user(
+                    first_name=first_name,
+                    last_name=last_name,
+                    email=email,
+                    password=password,
+                    country=request.user.country,
+                    role=role
+                )
+                # EmailService catches SMTP errors itself and returns False
+                if not EmailService.send_credentials_email(user, password, role_labels.get(role, 'Utilisateur')):
+                    raise CredentialsEmailError()
+        except CredentialsEmailError:
+            return Response(
+                {'error': "Le compte n'a pas été créé : l'e-mail d'identifiants n'a pas pu être envoyé. Réessayez plus tard."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-
-        file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'simple_users.txt')
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-        with open(file_path, 'a') as file:
-            file.write(f'Username: {user.username}, Password: {password}\n')
-
+        # Log credentials to file (internal backup) — must not fail the request
         try:
-            # Utiliser le service d'emails optimisé
-            EmailService.send_credentials_email(user, password, role_labels.get(role, 'Utilisateur'))
+            file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'simple_users.txt')
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, 'a') as file:
+                file.write(f'Username: {user.username}, Password: {password}\n')
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.warning("Création utilisateur : impossible d'écrire le fichier d'identifiants : %s", e)
 
         serializer = UserSerializer(user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -1369,7 +1366,9 @@ class CreateUsersByTerritorialAdminFromExcel(APIView):
                     return key
             return None
 
-        created_users = []
+        created_count = 0
+        ignored_count = 0
+        failed_emails = []
 
         for _, row in df.iterrows():
             first_name = str(row['firstname']).strip()
@@ -1378,70 +1377,93 @@ class CreateUsersByTerritorialAdminFromExcel(APIView):
             raw_role = row['role']
 
             if not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', email):
+                ignored_count += 1
                 continue  # skip invalid email
 
+            # Skip rows without first or last name (empty cells are read as NaN)
+            if pd.isna(row['firstname']) or pd.isna(row['lastname']) or not first_name or not last_name:
+                ignored_count += 1
+                continue
+
             if CustomUser.objects.filter(email=email).exists():
+                ignored_count += 1
                 continue  # skip existing user
 
             role = map_role(raw_role)
             if not role:
+                ignored_count += 1
                 continue  # skip unknown role
 
+            # Create user and send credentials atomically: if the email fails, the account
+            # is rolled back so no one ends up with an account they cannot log into.
             password = generate_password(length=8)
-
             try:
-                user = CustomUser.objects.create_user(
-                    first_name=first_name,
-                    last_name=last_name,
-                    email=email,
-                    password=password,
-                    country=request.user.country,
-                    role=role
-                )
+                with transaction.atomic():
+                    user = CustomUser.objects.create_user(
+                        first_name=first_name,
+                        last_name=last_name,
+                        email=email,
+                        password=password,
+                        country=request.user.country,
+                        role=role
+                    )
+                    self._send_credentials_email(user, password, role_labels.get(role, role))
             except Exception as e:
-                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+                logger.warning("Import utilisateurs : compte non créé pour %s (échec envoi e-mail : %s)", email, e)
+                failed_emails.append(email)
+                continue
 
+            created_count += 1
 
-            send_mail(
-                subject=f'Votre compte {role_labels.get(role, role)} sur Sunu Dash',
-                message=f"""
-                    Bonjour {user.first_name},
-
-                    Votre compte a été créé sur la plateforme Sunu Dash.
-
-                    Nom d'utilisateur : {user.username}
-                    Mot de passe : {password}
-                    Rôle : {role_labels.get(role, role)}
-
-                    Merci de modifier votre mot de passe lors de votre première connexion.
-                """,
-                from_email=settings.EMAIL_HOST_USER,
-                recipient_list=[email],
-                fail_silently=False,
-                html_message=f"""
-                    <html>
-                    <body style='font-family: Arial, sans-serif; background: #f8f9fa; padding: 32px;'>
-                        <div style='max-width: 480px; margin: auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 32px;'>
-                            <h2 style='color: #2d5be3;'>Bienvenue sur Sunu Dash !</h2>
-                            <p>Bonjour <strong>{user.first_name}</strong>,</p>
-                            <p>Votre compte <b>{role_labels.get(role, role)}</b> a été créé avec succès. Voici vos identifiants :</p>
-                            <ul>
-                                <li><b>Nom d'utilisateur :</b> {user.username}</li>
-                                <li><b>Mot de passe :</b> {password}</li>
-                                <li><b>Rôle :</b> {role_labels.get(role, role)}</li>
-                            </ul>
-                            <p>Merci de modifier votre mot de passe après votre première connexion.</p>
-                        </div>
-                    </body>
-                    </html>
-                """
-            )
-
-            created_users.append(user)
-
+        message = f"{created_count} utilisateur(s) créé(s) avec succès."
+        if failed_emails:
+            message += (f" {len(failed_emails)} compte(s) non créé(s) car l'e-mail d'identifiants "
+                        f"n'a pas pu être envoyé : {', '.join(failed_emails)}.")
         return Response({
-            'message': f'{len(created_users)} utilisateur(s) créé(s) avec succès.'
+            'message': message,
+            'created_count': created_count,
+            'lignes_ignores': ignored_count,
+            'echecs_envoi_email': failed_emails,
         }, status=status.HTTP_201_CREATED)
+
+    @staticmethod
+    def _send_credentials_email(user, password, role_label):
+        send_mail(
+            subject=f'Votre compte {role_label} sur Sunu Dash',
+            message=f"""
+                Bonjour {user.first_name},
+
+                Votre compte a été créé sur la plateforme Sunu Dash.
+
+                Nom d'utilisateur : {user.username}
+                Mot de passe : {password}
+                Rôle : {role_label}
+
+                Merci de modifier votre mot de passe lors de votre première connexion.
+            """,
+            from_email=settings.EMAIL_HOST_USER,
+            recipient_list=[user.email],
+            fail_silently=False,
+            html_message=f"""
+                <html>
+                <body style='font-family: Arial, sans-serif; background: #f8f9fa; padding: 32px;'>
+                    <div style='max-width: 480px; margin: auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 32px;'>
+                        <h2 style='color: #2d5be3;'>Bienvenue sur Sunu Dash !</h2>
+                        <p>Bonjour <strong>{user.first_name}</strong>,</p>
+                        <p>Votre compte <b>{role_label}</b> a été créé avec succès. Voici vos identifiants :</p>
+                        <ul>
+                            <li><b>Nom d'utilisateur :</b> {user.username}</li>
+                            <li><b>Mot de passe :</b> {password}</li>
+                            <li><b>Rôle :</b> {role_label}</li>
+                        </ul>
+                        <p>Merci de modifier votre mot de passe après votre première connexion.</p>
+                    </div>
+                </body>
+                </html>
+            """
+        )
+
+
 
 
 class SimpleUserListView(APIView):
