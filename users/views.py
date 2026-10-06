@@ -423,7 +423,7 @@ class CreateGlobalAdminView(APIView):
 
         # Check for existing user
         if CustomUser.objects.filter(email=email).exists():
-            return Response({'message': "Un utilisateur avec cet e-mail existe déjà."}, status=status.HTTP_200_OK)
+            return Response({'error': "Un utilisateur avec cet e-mail existe déjà."}, status=status.HTTP_409_CONFLICT)
 
         password = generate_password(length=8)
 
