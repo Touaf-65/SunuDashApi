@@ -12,6 +12,9 @@ class CountrySerializer(serializers.ModelSerializer):
             'currency_name',
             'is_active',
         )
+        extra_kwargs = {
+            'code': {'error_messages': {'max_length': "Le code pays doit contenir uniquement des lettres (max 4)."}},
+        }
 
     def validate_code(self, value):
         if not value.isalpha() or len(value) > 4:

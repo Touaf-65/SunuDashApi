@@ -1,3 +1,4 @@
+import pandas as pd
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -7,6 +8,7 @@ from rest_framework import status
 from .models import Country
 from .serializers import CountrySerializer
 from users.permissions import IsGlobalAdmin, IsSuperUser
+from users.utils import read_import_file
 
 class CreateCountryView(APIView):
     """
@@ -53,76 +55,78 @@ class CreateCountryView(APIView):
 
 class CreateCountryFromExcel(APIView):
     """
-    View allowing a global admin to bulk create countries from an Excel file.
+    View allowing a global admin to bulk create countries from an Excel or CSV file
+    (.xlsx, .xls, .csv).
     Required columns: 'name', 'code'.
-    Optional columns: 'currency_code', 'currency_name'.
-    Existing countries (by name or code) are skipped.
+    Optional columns: 'currency_code', 'currency_name' (defaults: XOF / F CFA).
+    Rows are skipped, with their reason, when the name or code is missing or invalid,
+    or when a country with the same name or code (case-insensitive) already exists.
     """
     permission_classes = [IsAuthenticated, IsGlobalAdmin]
 
     def post(self, request):
         file = request.FILES.get('file')
         if not file:
-            return Response({'error': 'No file provided.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Aucun fichier fourni.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            df = pd.read_excel(file)
+            df = read_import_file(file)
         except Exception as e:
-            return Response({'error': f"Error reading file: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': f"Fichier invalide : {e}"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Required columns
         required_headers = ['name', 'code']
         if not all(header in df.columns for header in required_headers):
-            return Response({'error': 'Missing required columns: "name" and/or "code".'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Le fichier doit contenir les colonnes : name, code.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Optional columns
-        has_currency_code = 'currency_code' in df.columns
-        has_currency_name = 'currency_name' in df.columns
+        def cell(row, column):
+            """Cleaned text of an optional cell, or '' if the column is absent or the cell empty."""
+            if column not in df.columns or pd.isna(row[column]):
+                return ''
+            return str(row[column]).strip()
 
         created_countries = []
+        skipped_rows = []
 
         for index, row in df.iterrows():
-            name = str(row['name']).strip() if pd.notna(row['name']) else ''
-            code = str(row['code']).strip().upper() if pd.notna(row['code']) else ''
+            line = index + 2  # line number in the file (header is line 1)
+            name = cell(row, 'name')
+            code = cell(row, 'code').upper()
 
             if not name or not code:
-                skipped_rows.append({
-                    'row': index + 2,
-                    'reason': "Missing name or code."
-                })
+                skipped_rows.append({'row': line, 'reason': "Nom ou code manquant."})
                 continue
 
-            name_exists = Country.objects.filter(name__iexact=name).exists()
-            code_exists = Country.objects.filter(code__iexact=code).exists()
+            if Country.objects.filter(name__iexact=name).exists():
+                skipped_rows.append({'row': line, 'reason': f"Un pays nommé « {name} » existe déjà."})
+                continue
+            if Country.objects.filter(code__iexact=code).exists():
+                skipped_rows.append({'row': line, 'reason': f"Un pays de code « {code} » existe déjà."})
+                continue
 
+            data = {'name': name.title(), 'code': code}
+            # Empty currency cells keep the model defaults (XOF / F CFA)
+            if cell(row, 'currency_code'):
+                data['currency_code'] = cell(row, 'currency_code')
+            if cell(row, 'currency_name'):
+                data['currency_name'] = cell(row, 'currency_name')
 
-            # Optional fields
-            currency_code = ''
-            currency_name = ''
+            serializer = CountrySerializer(data=data)
+            if not serializer.is_valid():
+                reasons = " ".join(str(msg) for errors in serializer.errors.values() for msg in errors)
+                skipped_rows.append({'row': line, 'reason': reasons})
+                continue
+            created_countries.append(serializer.save())
 
-            if has_currency_code:
-                value = row['currency_code']
-                if pd.notna(value) and str(value).strip():
-                    currency_code = str(value).strip().upper()
-
-            if has_currency_name:
-                value = row['currency_name']
-                if pd.notna(value) and str(value).strip():
-                    currency_name = str(value).strip()
-
-            country = Country(
-                name=name.title(),
-                code=code,
-                currency_code=currency_code,
-                currency_name=currency_name,
-            )
-            country.save()
-            created_countries.append(country)
-
-        serializer = CountrySerializer(created_countries, many=True)
+        message = f"{len(created_countries)} pays créé(s) avec succès."
+        if skipped_rows:
+            message += f" {len(skipped_rows)} ligne(s) ignorée(s)."
         return Response({
+            'message': message,
             'created_count': len(created_countries),
-            'created_countries': serializer.data,
+            'created_countries': CountrySerializer(created_countries, many=True).data,
+            'lignes_ignores': len(skipped_rows),
+            'skipped_rows': skipped_rows,
         }, status=status.HTTP_201_CREATED)
 
 
