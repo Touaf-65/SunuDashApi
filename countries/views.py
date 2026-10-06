@@ -138,7 +138,7 @@ class CountryMixin:
 
     def get_country(self, pk, user=None):
         try:
-            if user and not user.is_superuser:
+            if user and not user.is_superuser_role():
                 # Global Admins can only access active countries
                 return Country.objects.get(pk=pk, is_active=True)
             return Country.objects.get(pk=pk)
@@ -169,26 +169,16 @@ class ListCountriesView(APIView):
 
 class CountryDetailView(APIView, CountryMixin):
     """
-    Retrieve a country's details by its ID.
-    - Global Admins: only active countries, and 'is_active' is hidden.
-    - Superusers: see everything.
+    Retrieve a country's details by its ID, in the same format as the list
+    (id, name, code, currency_code, currency_name, is_active).
+    - Global Admins: only active countries.
+    - Superusers: all countries, active or not.
     """
     permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin]
 
     def get(self, request, pk):
         country = self.get_country(pk, request.user)
-
-        data = {
-            "name": country.name,
-            "code": country.code,
-            "currency": country.currency_name,
-            "currency code": country.currency_code
-        }
-
-        if request.user.is_superuser:
-            data["is_active"] = country.is_active
-
-        return Response(data, status=status.HTTP_200_OK)
+        return Response(CountrySerializer(country).data, status=status.HTTP_200_OK)
 
 
 class CountryUpdateView(APIView, CountryMixin):
