@@ -22,7 +22,9 @@ import re
 import random
 import string
 import os
+import logging
 import pandas as pd
+from django.db import transaction
 
 from django.contrib.auth import get_user_model
 
@@ -33,6 +35,9 @@ from .tasks import (
     send_country_assignment_email_task,
     send_reset_password_email_task
 )
+
+logger = logging.getLogger(__name__)
+
 
 class SuperuserCreateAPIView(APIView):
     """
@@ -525,6 +530,7 @@ class CreateAdminGlobalFromFileView(APIView):
 
         ignored_count = 0
         created_count = 0
+        failed_emails = []
 
         # Role filtering
         if 'role' in df.columns:
@@ -557,30 +563,52 @@ class CreateAdminGlobalFromFileView(APIView):
                 ignored_count += 1
                 continue
 
-            # Create user (same as CreateGlobalAdminView: username generated from first/last name)
+            # Create user and send credentials atomically: if the email fails, the account
+            # is rolled back so no one ends up with an account they cannot log into.
             password = generate_password(length=8)
+            try:
+                with transaction.atomic():
+                    user = CustomUser.objects.create_user(
+                        first_name=first_name,
+                        last_name=last_name,
+                        email=email,
+                        password=password,
+                        is_staff=True,
+                        is_active=True,
+                        role=CustomUser.Roles.ADMIN_GLOBAL,
+                    )
+                    self._send_credentials_email(user, password)
+            except Exception as e:
+                logger.warning("Import admin global : compte non créé pour %s (échec envoi e-mail : %s)", email, e)
+                failed_emails.append(email)
+                continue
 
-            user = CustomUser.objects.create_user(
-                first_name=first_name,
-                last_name=last_name,
-                email=email,
-                password=password,
-                is_staff=True,
-                is_active=True,
-                role=CustomUser.Roles.ADMIN_GLOBAL,
-            )
             created_count += 1
 
-             # Log credentials to file (for internal auditing or backup)
+            # Log credentials to file (for internal auditing or backup) — must not abort the import
             try:
                 file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'global_users.txt')
                 with open(file_path, 'a') as file:
                     file.write(f'Username: {user.username}, Password: {password}\n')
             except Exception as e:
-                return Response({'error': f"Failed to log credentials: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                logger.warning("Import admin global : impossible d'écrire le fichier d'identifiants : %s", e)
 
+        message = f"{created_count} administrateur(s) global(aux) créé(s) avec succès."
+        if failed_emails:
+            message += (f" {len(failed_emails)} compte(s) non créé(s) car l'e-mail d'identifiants "
+                        f"n'a pas pu être envoyé : {', '.join(failed_emails)}.")
+        return Response(
+            {
+                "message": message,
+                "created_count": created_count,
+                "lignes_ignores": ignored_count,
+                "echecs_envoi_email": failed_emails,
+            },
+            status=status.HTTP_200_OK
+        )
 
-            # Send email
+    @staticmethod
+    def _send_credentials_email(user, password):
             subject = 'Votre compte Administrateur Global sur SUNU DASH a été créé'
             plain_message = (
                 f"Bonjour {user.first_name},\n\n"
@@ -608,26 +636,12 @@ class CreateAdminGlobalFromFileView(APIView):
                 </body>
                 </html>
             """
-            try:
-                send_user_email(
-                    to_email=email,
-                    subject=subject,
-                    plain_text_content=plain_message,
-                    html_content=html_message
-                )
-            except Exception as e:
-                return Response(
-                    {'detail': f'Utilisateur créé mais échec de l\'envoi de l\'email : {str(e)}'},
-                    status=status.HTTP_201_CREATED
-                )
-
-        return Response(
-            {
-                "message": f"{created_count} administrateur(s) global(aux) créé(s) avec succès.",
-                "lignes_ignores": ignored_count
-            },
-            status=status.HTTP_200_OK
-        )
+            send_user_email(
+                to_email=user.email,
+                subject=subject,
+                plain_text_content=plain_message,
+                html_content=html_message
+            )
 
 
 class GlobalAdminListView(APIView):
