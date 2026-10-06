@@ -151,11 +151,17 @@ class GetConnectedUserByLogin(APIView):
     URL parameter:
         - login: The username or email of the user.
 
+    Only the connected user's own profile can be read (the sign-in page calls it
+    right after login with the login just typed).
+
     Response:
-        - 200 OK: Returns user information if found.
-        - 404 Not Found: If no user matches the provided login.
+        - 200 OK: Returns the connected user's information.
+        - 401 Unauthorized: Not authenticated.
+        - 404 Not Found: The login does not match the connected user (whether or not
+          another account exists, so accounts cannot be enumerated).
         - 500 Internal Server Error: For unexpected errors.
     """
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, login):
         try:
@@ -163,7 +169,7 @@ class GetConnectedUserByLogin(APIView):
                 Q(username__iexact=login) | Q(email__iexact=login)
             ).select_related('country').first()
 
-            if not user:
+            if not user or user.pk != request.user.pk:
                 return Response({'error': 'Utilisateur non trouvé.'}, status=status.HTTP_404_NOT_FOUND)
 
             data = {
