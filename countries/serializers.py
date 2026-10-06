@@ -12,14 +12,43 @@ class CountrySerializer(serializers.ModelSerializer):
             'currency_name',
             'is_active',
         )
+        # L'unicité du nom et du code est vérifiée dans validate_name / validate_code
+        # (sans tenir compte de la casse, messages en français) : on retire les
+        # validateurs d'unicité automatiques, sensibles à la casse et en anglais.
         extra_kwargs = {
-            'code': {'error_messages': {'max_length': "Le code pays doit contenir uniquement des lettres (max 4)."}},
+            'name': {'validators': [], 'error_messages': {'blank': "Le nom du pays est requis."}},
+            'code': {'validators': [], 'error_messages': {
+                'blank': "Le code pays est requis.",
+                'max_length': "Le code pays doit contenir uniquement des lettres (max 4).",
+            }},
         }
+
+    def validate_name(self, value):
+        """
+        Nom unique sans tenir compte de la casse (« togo » = « TOGO »). La contrainte
+        unique de la base est sensible à la casse et ne suffit pas. Le pays modifié
+        est exclu, pour pouvoir changer la casse de son propre nom.
+        """
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Le nom du pays est requis.")
+        duplicates = Country.objects.filter(name__iexact=value)
+        if self.instance is not None:
+            duplicates = duplicates.exclude(pk=self.instance.pk)
+        if duplicates.exists():
+            raise serializers.ValidationError(f"Un pays avec le nom « {value} » existe déjà.")
+        return value
 
     def validate_code(self, value):
         if not value.isalpha() or len(value) > 4:
             raise serializers.ValidationError("Le code pays doit contenir uniquement des lettres (max 4).")
-        return value.upper()
+        value = value.upper()
+        duplicates = Country.objects.filter(code__iexact=value)
+        if self.instance is not None:
+            duplicates = duplicates.exclude(pk=self.instance.pk)
+        if duplicates.exists():
+            raise serializers.ValidationError(f"Un pays avec le code « {value} » existe déjà.")
+        return value
 
     def validate_currency_code(self, value):
         if value and (not value.isalpha() or len(value) > 10):
