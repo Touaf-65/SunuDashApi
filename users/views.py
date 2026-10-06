@@ -547,24 +547,28 @@ class CreateAdminGlobalFromFileView(APIView):
                 ignored_count += 1
                 continue
 
+            # Skip rows without first or last name (empty Excel cells are read as NaN)
+            if pd.isna(row['first_name']) or pd.isna(row['last_name']) or not first_name or not last_name:
+                ignored_count += 1
+                continue
+
             # Skip existing users
             if CustomUser.objects.filter(email=email).exists():
                 ignored_count += 1
                 continue
 
-            # Create user
+            # Create user (same as CreateGlobalAdminView: username generated from first/last name)
             password = generate_password(length=8)
 
             user = CustomUser.objects.create_user(
-                username=username,
-                email=email,
                 first_name=first_name,
                 last_name=last_name,
-                role='global_admin',
-                is_active=True
+                email=email,
+                password=password,
+                is_staff=True,
+                is_active=True,
+                role=CustomUser.Roles.ADMIN_GLOBAL,
             )
-            user.set_password(password)
-            user.save()
             created_count += 1
 
              # Log credentials to file (for internal auditing or backup)
