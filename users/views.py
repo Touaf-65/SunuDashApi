@@ -2,7 +2,7 @@ from django.shortcuts import render
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from .models import CustomUser, PasswordResetToken
 from countries.models import Country
 from .serializers import UserSerializer, PasswordResetConfirmSerializer, PasswordResetRequestSerializer
@@ -73,65 +73,29 @@ class SuperuserCreateAPIView(APIView):
         # Generate a random password
         password = generate_password()
 
+        # Create the superuser and send its credentials atomically: the password is only
+        # ever transmitted by email, so the account must not exist if the email fails.
         try:
-            # Create the superuser with generated password
-            user = CustomUser.objects.create_superuser(
-                first_name=first_name,
-                last_name=last_name,
-                email=email,
-                password=password,
-                is_staff=True,
-                is_superuser=True,
+            with transaction.atomic():
+                user = CustomUser.objects.create_superuser(
+                    first_name=first_name,
+                    last_name=last_name,
+                    email=email,
+                    password=password,
+                    is_staff=True,
+                    is_superuser=True,
+                    role=CustomUser.Roles.SUPERUSER,
+                )
+                # EmailService catches SMTP errors itself and returns False
+                if not EmailService.send_credentials_email(user, password, "Superutilisateur"):
+                    raise CredentialsEmailError()
+        except CredentialsEmailError:
+            return Response(
+                {'detail': "Le compte n'a pas été créé : l'e-mail d'identifiants n'a pas pu être envoyé. Réessayez plus tard."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
-            user.role = CustomUser.Roles.SUPERUSER
-            user.save()
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Save credentials to a local file for reference
-        file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'superuser.txt')
-        with open(file_path, 'a') as file:
-            file.write(f'Nom d\'utilisateur : {user.username}, Mot de passe : {password}\n')
-
-        # Prepare email content in French
-        subject = 'Votre compte Superutilisateur sur SUNU DASH a été créé'
-
-        plain_text = f"""
-        Bonjour {user.first_name},
-
-        Votre nom d'utilisateur est : {user.username}
-        Votre mot de passe est : {password}
-        Votre rôle sur la plateforme est : Superutilisateur.
-
-        Merci de changer votre mot de passe après votre première connexion pour garantir la sécurité de votre compte.
-        """
-
-        html_message = f"""
-        <html>
-        <body style='font-family: Arial, sans-serif; background: #f8f9fa; padding: 32px;'>
-            <div style='max-width: 480px; margin: auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 32px;'>
-                <h2 style='color: #2d5be3; margin-bottom: 12px;'>Bienvenue sur Sunu Dash !</h2>
-                <p style='font-size: 16px; color: #222;'>Bonjour <strong>{user.first_name}</strong>,</p>
-                <p style='font-size: 16px; color: #222;'>Votre compte <b>Superutilisateur</b> a été créé avec succès. Voici vos identifiants&nbsp;:</p>
-                <ul style='font-size: 16px; color: #222; list-style: none; padding: 0;'>
-                    <li><b>Nom d'utilisateur&nbsp;:</b> <span style='color: #2d5be3;'>{user.username}</span></li>
-                    <li><b>Mot de passe&nbsp;:</b> <span style='color: #2d5be3;'>{password}</span></li>
-                    <li><b>Rôle&nbsp;:</b> <span style='color: #2d5be3;'>Superutilisateur</span></li>
-                </ul>
-                <p style='font-size: 15px; color: #444; margin-top: 20px;'>Merci de changer votre mot de passe après votre première connexion pour garantir la sécurité de votre compte.</p>
-                <hr style='margin: 28px 0;'>
-                <p style='font-size: 13px; color: #999;'>Ceci est un message automatique. Merci de ne pas répondre directement à cet email.</p>
-            </div>
-        </body>
-        </html>
-        """
-
-        # Send email with credentials
-        try:
-            # Utiliser le service d'emails optimisé
-            EmailService.send_credentials_email(user, password, "Superutilisateur")
-        except Exception as e:
-            return Response({'detail': f'Utilisateur créé mais échec de l’envoi du mail : {str(e)}'}, status=status.HTTP_201_CREATED)
 
         return Response({'detail': 'Superutilisateur créé avec succès. Identifiants envoyés par email.'}, status=status.HTTP_201_CREATED)
 
@@ -140,6 +104,11 @@ class LoginUserAPIView(APIView):
     """
     API endpoint for user login via username or email.
     """
+
+    # Route publique : ignorer tout en-tête Authorization (un jeton absent ou expiré
+    # envoyé par le navigateur ne doit pas provoquer de 401).
+    authentication_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         login = request.data.get('login')
@@ -266,6 +235,11 @@ class PasswordResetRequestView(APIView):
         - 500 Internal Server Error: Email sending failed
     """
 
+    # Route publique : ignorer tout en-tête Authorization (un jeton absent ou expiré
+    # envoyé par le navigateur ne doit pas provoquer de 401).
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
         if serializer.is_valid():
@@ -282,11 +256,11 @@ class PasswordResetRequestView(APIView):
             token = PasswordResetToken.objects.create(user=user)
 
             # Lien de réinitialisation
-            reset_link = f"https://sunudash.netlify.app/auth/new-password/{token.token}/"
+            reset_link = f"{settings.FRONTEND_URL}/auth/new-password/{token.token}/"
 
             from_email = settings.EMAIL_HOST_USER
 
-            subject='Demande de réinitialisation de votre mot de passe Sunu Dash',
+            subject = 'Demande de réinitialisation de votre mot de passe Sunu Dash'
 
             plain_message=(
                 f"Bonjour {user.first_name},\n\n"
@@ -348,6 +322,11 @@ class PasswordResetConfirmView(APIView):
         - 400 Bad Request: Invalid token, expired token, or password mismatch
     """
 
+    # Route publique : ignorer tout en-tête Authorization (un jeton absent ou expiré
+    # envoyé par le navigateur ne doit pas provoquer de 401).
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
         if serializer.is_valid():
@@ -370,31 +349,9 @@ class PasswordResetConfirmView(APIView):
             # Suppression du token après utilisation
             reset_token.delete()
 
-            # Envoi de l'email de confirmation
-            subject = 'Votre mot de passe a été réinitialisé'
-
-            plain_message = (
-                f'Bonjour {user.first_name},\n\n'
-                f'Votre mot de passe Sunu Dash a bien été réinitialisé.'
-            )
-
-            html_message = f"""
-                <html>
-                <body style='font-family: Arial, sans-serif; background: #f8f9fa; padding: 32px;'>
-                    <div style='max-width: 480px; margin: auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 32px;'>
-                        <h2 style='color: #2d5be3; margin-bottom: 12px;'>Mot de passe réinitialisé</h2>
-                        <p style='font-size: 16px; color: #222;'>Bonjour <strong>{user.first_name}</strong>,</p>
-                        <p style='font-size: 16px; color: #222;'>Votre mot de passe Sunu Dash a bien été réinitialisé.</p>
-                        <p style='font-size: 15px; color: #444;'>Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.</p>
-                        <hr style='margin: 28px 0;'>
-                        <p style='font-size: 13px; color: #999;'>Si vous n'êtes pas à l'origine de cette action, contactez immédiatement un administrateur.<br>Ceci est un message automatique. Merci de ne pas répondre directement à cet email.</p>
-                    </div>
-                </body>
-                </html>
-            """
-
-            # Utiliser le service d'emails optimisé
-            EmailService.send_credentials_email(user, password, "Administrateur Global")
+            # E-mail de confirmation (sans le mot de passe). Le mot de passe est déjà changé :
+            # un échec d'envoi ne doit pas faire échouer la requête (EmailService renvoie False).
+            EmailService.send_password_change_email(user, request)
 
             return Response({"message": "Votre mot de passe a été réinitialisé avec succès."}, status=status.HTTP_200_OK)
 
@@ -459,13 +416,6 @@ class CreateGlobalAdminView(APIView):
         except Exception as e:
             return Response({'error': f"Échec de la création de l'utilisateur : {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Log credentials to file (internal backup) — must not fail the request
-        try:
-            file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'global_users.txt')
-            with open(file_path, 'a') as file:
-                file.write(f'Username: {user.username}, Password: {password}\n')
-        except Exception as e:
-            logger.warning("Création admin global : impossible d'écrire le fichier d'identifiants : %s", e)
 
         return Response(
             {"message": "Administrateur Global créé avec succès. Un email contenant les informations de connexion a été envoyé."},
@@ -564,13 +514,6 @@ class CreateAdminGlobalFromFileView(APIView):
 
             created_count += 1
 
-            # Log credentials to file (for internal auditing or backup) — must not abort the import
-            try:
-                file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'global_users.txt')
-                with open(file_path, 'a') as file:
-                    file.write(f'Username: {user.username}, Password: {password}\n')
-            except Exception as e:
-                logger.warning("Import admin global : impossible d'écrire le fichier d'identifiants : %s", e)
 
         message = f"{created_count} administrateur(s) global(aux) créé(s) avec succès."
         if failed_emails:
@@ -757,13 +700,6 @@ class CreateTerritorialAdminView(APIView):
             except Exception as e:
                 return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Log credentials to file (internal backup) — must not fail the request
-            try:
-                file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'territorial_users.txt')
-                with open(file_path, 'a') as file:
-                    file.write(f'Username: {user.username}, Password: {password}\n')
-            except Exception as e:
-                logger.warning("Création admin territorial : impossible d'écrire le fichier d'identifiants : %s", e)
 
             return Response({'detail': 'Administrateur Territorial créé avec succès. Identifiants envoyés par email.'}, status=status.HTTP_201_CREATED)
 
@@ -883,14 +819,6 @@ class CreateTerritorialAdminsFromExcel(APIView):
 
             created_count += 1
 
-            # Log credentials to file (for internal auditing or backup) — must not abort the import
-            try:
-                file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'territorial_users.txt')
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                with open(file_path, 'a') as f:
-                    f.write(f'Username: {user.username}, Password: {password}\n')
-            except Exception as e:
-                logger.warning("Import admin territorial : impossible d'écrire le fichier d'identifiants : %s", e)
 
         message = f"{created_count} administrateur(s) territorial(aux) créé(s) avec succès."
         if failed_emails:
@@ -1296,14 +1224,6 @@ class CreateUserByTerritorialAdmin(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Log credentials to file (internal backup) — must not fail the request
-        try:
-            file_path = os.path.join(settings.BASE_DIR, 'users/users_txt', 'simple_users.txt')
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, 'a') as file:
-                file.write(f'Username: {user.username}, Password: {password}\n')
-        except Exception as e:
-            logger.warning("Création utilisateur : impossible d'écrire le fichier d'identifiants : %s", e)
 
         serializer = UserSerializer(user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
