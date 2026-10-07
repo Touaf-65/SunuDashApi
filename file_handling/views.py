@@ -41,7 +41,8 @@ class FileDeleteView(APIView):
             msg = "Référence au fichier retirée des sinistres."
 
         file.delete()
-        return Response({"detail": f"Fichier supprimé avec succès. {msg}"}, status=status.HTTP_204_NO_CONTENT)
+        # 200 (et non 204) pour pouvoir renvoyer le message : un 204 avec corps est une réponse HTTP invalide
+        return Response({"detail": f"Fichier supprimé avec succès. {msg}"}, status=status.HTTP_200_OK)
 
 
 class FileDownloadView(APIView):

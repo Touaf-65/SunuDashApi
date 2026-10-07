@@ -581,10 +581,8 @@ class GlobalAdminListView(APIView):
     permission_classes = [IsAuthenticated, IsSuperUser]
 
     def get(self, request):
+        # Liste vide → 200 avec [] (comme les autres listes) : un 204 avec corps est une réponse HTTP invalide
         users = CustomUser.objects.filter(role=CustomUser.Roles.ADMIN_GLOBAL).order_by('-date_joined')
-        if not users.exists():
-            return Response({'detail': 'Aucun administrateur global trouvé.'}, status=status.HTTP_204_NO_CONTENT)
-
         serializer = UserSerializer(users, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -649,7 +647,9 @@ class GlobalAdminDeleteView(APIView, GlobalAdminMixin):
             return Response({'error': 'Administrateur global non trouvé'}, status=status.HTTP_404_NOT_FOUND)
 
         user.delete()
-        return Response({'detail': 'Administrateur global supprimé avec succès.'}, status=status.HTTP_204_NO_CONTENT)
+        # 204 = réponse SANS corps (un corps rend la réponse HTTP invalide : le proxy
+        # du frontend échouait avec HPE_INVALID_CONSTANT alors que la suppression était faite)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CreateTerritorialAdminView(APIView):
