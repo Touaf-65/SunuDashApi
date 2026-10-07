@@ -60,6 +60,10 @@ class CustomUser(AbstractUser, PermissionsMixin):
         choices=Roles.choices,
         default=Roles.RESP_OPERATEUR,
     )
+    # Vrai pour un compte créé avec un mot de passe généré (envoyé par e-mail) : tant que
+    # l'utilisateur n'a pas choisi son propre mot de passe, l'API ne lui ouvre que le
+    # changement de mot de passe (voir users/authentication.py).
+    must_change_password = models.BooleanField(default=False)
     objects = CustomUserManager()
 
     USERNAME_FIELD = 'username'

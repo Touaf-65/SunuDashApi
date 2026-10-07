@@ -2,7 +2,8 @@ from django.urls import path
 from .views import ( SuperuserCreateAPIView, LoginUserAPIView, GetConnectedUserByLogin, VerifyPassword, CreateGlobalAdminView, PasswordResetRequestView, PasswordResetConfirmView, CreateAdminGlobalFromFileView, 
     GlobalAdminListView, GlobalAdminDetailView, GlobalAdminUpdateView, GlobalAdminDeleteView, CreateTerritorialAdminView, CreateTerritorialAdminsFromExcel, TerritorialAdminListView,
     TerritorialAdminDetailView, TerritorialAdminUpdateView, TerritorialAdminDeleteView, AssignCountryToTerritorialAdminView, UnassignOrReassignCountryView,
-    CreateUserByTerritorialAdmin, CreateUsersByTerritorialAdminFromExcel, SimpleUserListView, SimpleUserDetailView, SimpleUserUpdateView, SimpleUserDeleteView, ToggleUserActiveView )
+    CreateUserByTerritorialAdmin, CreateUsersByTerritorialAdminFromExcel, SimpleUserListView, SimpleUserDetailView, SimpleUserUpdateView, SimpleUserDeleteView, ToggleUserActiveView,
+    ChangePasswordView )
 
 urlpatterns = [
     path('create_superuser/', SuperuserCreateAPIView.as_view(), name='create_superuser'),
@@ -10,6 +11,7 @@ urlpatterns = [
     path('login/', LoginUserAPIView.as_view(), name='login_user'),
     path('getConnectedUser/<str:login>/', GetConnectedUserByLogin.as_view(), name='get_connected_user_by_login'),
     path('verify_password/', VerifyPassword.as_view(), name='verify_password'),
+    path('change_password/', ChangePasswordView.as_view(), name='change_password'),
 
     path('password_reset/', PasswordResetRequestView.as_view(), name='password_reset_request'),
     path('password_reset_confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),

@@ -112,7 +112,7 @@ CREDENTIALS_TEMPLATE = """<!DOCTYPE html>
         <p>Conseils pour votre première connexion :</p>
         <ul>
             <li>Copiez vos identifiants</li>
-            <li>Changez votre mot de passe après la première connexion</li>
+            <li>Vous devrez choisir un nouveau mot de passe lors de votre première connexion</li>
             <li>Explorez votre tableau de bord</li>
         </ul>
         

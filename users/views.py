@@ -10,6 +10,8 @@ from countries.serializers import CountrySerializer
 from django.core.mail import send_mail
 from django.conf import settings
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.utils import translation
 from django.db.models import Q
 from django.contrib.auth.models import User
 
@@ -83,6 +85,7 @@ class SuperuserCreateAPIView(APIView):
                     last_name=last_name,
                     email=email,
                     password=password,
+                    must_change_password=True,  # mot de passe généré : à changer à la 1re connexion
                     is_staff=True,
                     is_superuser=True,
                     role=CustomUser.Roles.SUPERUSER,
@@ -144,6 +147,8 @@ class LoginUserAPIView(APIView):
                 'username': user.username,
                 'email': user.email,
                 'role': user.role,
+                # Vrai → le frontend envoie directement vers le changement de mot de passe
+                'must_change_password': user.must_change_password,
             }, status=status.HTTP_200_OK)
 
         return Response({"error": "Identifiants invalides."}, status=status.HTTP_401_UNAUTHORIZED)
@@ -188,6 +193,7 @@ class GetConnectedUserByLogin(APIView):
                 'username': user.username,
                 'first_name': user.first_name,
                 'last_name': user.last_name,
+                'must_change_password': user.must_change_password,
             }
             return Response(data, status=status.HTTP_200_OK)
 
@@ -222,6 +228,55 @@ class VerifyPassword(APIView):
             return Response({'error': 'Password is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(request.user.check_password(password), status=status.HTTP_200_OK)
+
+
+class ChangePasswordView(APIView):
+    """
+    Changement de mot de passe par l'utilisateur connecté.
+
+    Obligatoire à la première connexion d'un compte créé avec un mot de passe généré
+    (must_change_password) : c'est la seule route qui lui est ouverte avec son profil.
+
+    Corps : {"old_password": "...", "new_password": "...", "confirm_password": "..."}
+    - 200 : mot de passe changé, must_change_password levé, e-mail de confirmation envoyé
+    - 400 : champ manquant, ancien mot de passe incorrect, confirmation différente,
+            nouveau mot de passe identique à l'ancien ou refusé par les règles de sécurité
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        old_password = request.data.get('old_password') or ''
+        new_password = request.data.get('new_password') or ''
+        confirm_password = request.data.get('confirm_password') or ''
+
+        if not (old_password and new_password and confirm_password):
+            return Response({'error': "L'ancien mot de passe, le nouveau et sa confirmation sont requis."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if not user.check_password(old_password):
+            return Response({'error': "Le mot de passe actuel est incorrect."}, status=status.HTTP_400_BAD_REQUEST)
+        if new_password != confirm_password:
+            return Response({'error': "La confirmation ne correspond pas au nouveau mot de passe."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if new_password == old_password:
+            return Response({'error': "Le nouveau mot de passe doit être différent de l'actuel."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Règles de sécurité de Django (AUTH_PASSWORD_VALIDATORS), messages en français
+        try:
+            with translation.override('fr'):
+                validate_password(new_password, user=user)
+        except ValidationError as e:
+            return Response({'error': " ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.must_change_password = False
+        user.save(update_fields=['password', 'must_change_password'])
+
+        # Confirmation sans le mot de passe ; un échec d'envoi ne remet pas en cause le changement
+        EmailService.send_password_change_email(user, request)
+
+        return Response({'message': "Votre mot de passe a été modifié."}, status=status.HTTP_200_OK)
 
 
 class PasswordResetRequestView(APIView):
@@ -352,6 +407,8 @@ class PasswordResetConfirmView(APIView):
             # Changement du mot de passe
             user = reset_token.user
             user.set_password(new_password)
+            # L'utilisateur a choisi lui-même son mot de passe : plus de changement obligatoire
+            user.must_change_password = False
             user.save()
 
             # Suppression du token après utilisation
@@ -410,6 +467,7 @@ class CreateGlobalAdminView(APIView):
                     last_name=last_name,
                     email=email,
                     password=password,
+                    must_change_password=True,  # mot de passe généré : à changer à la 1re connexion
                     is_staff=True,
                     role=CustomUser.Roles.ADMIN_GLOBAL,
                 )
@@ -510,6 +568,7 @@ class CreateAdminGlobalFromFileView(APIView):
                         last_name=last_name,
                         email=email,
                         password=password,
+                        must_change_password=True,  # mot de passe généré : à changer à la 1re connexion
                         is_staff=True,
                         is_active=True,
                         role=CustomUser.Roles.ADMIN_GLOBAL,
@@ -545,7 +604,7 @@ class CreateAdminGlobalFromFileView(APIView):
                 f"Votre nom d'utilisateur est : {user.username}\n"
                 f"Votre mot de passe est : {password}\n"
                 f"Votre rôle sur la plateforme est : Administrateur Global.\n\n"
-                f"Merci de changer votre mot de passe après votre première connexion."
+                f"Vous devrez choisir un nouveau mot de passe lors de votre première connexion."
             )
             html_message = f"""
                 <html>
@@ -559,7 +618,7 @@ class CreateAdminGlobalFromFileView(APIView):
                             <li><b>Mot de passe&nbsp;:</b> <span style='color: #2d5be3;'>{password}</span></li>
                             <li><b>Rôle&nbsp;:</b> <span style='color: #2d5be3;'>Administrateur Global</span></li>
                         </ul>
-                        <p style='font-size: 15px; color: #444; margin-top: 20px;'>Merci de changer votre mot de passe après votre première connexion pour garantir la sécurité de votre compte.</p>
+                        <p style='font-size: 15px; color: #444; margin-top: 20px;'>Vous devrez choisir un nouveau mot de passe lors de votre première connexion.</p>
                         <hr style='margin: 28px 0;'>
                         <p style='font-size: 13px; color: #999;'>Ceci est un message automatique. Merci de ne pas répondre directement à cet email.</p>
                     </div>
@@ -692,6 +751,7 @@ class CreateTerritorialAdminView(APIView):
                         last_name=last_name,
                         email=email,
                         password=password,
+                        must_change_password=True,  # mot de passe généré : à changer à la 1re connexion
                         is_staff=True,
                         role=CustomUser.Roles.ADMIN_TERRITORIAL,
                     )
@@ -724,7 +784,7 @@ class CreateTerritorialAdminView(APIView):
             Votre mot de passe est : {password}
             Votre rôle sur la plateforme est : Administrateur Territorial.
 
-            Merci de changer votre mot de passe après votre première connexion pour garantir la sécurité de votre compte.
+            Vous devrez choisir un nouveau mot de passe lors de votre première connexion.
             """
 
             html_message=f"""
@@ -739,7 +799,7 @@ class CreateTerritorialAdminView(APIView):
                             <li><b>Mot de passe&nbsp;:</b> <span style='color: #2d5be3;'>{password}</span></li>
                             <li><b>Rôle&nbsp;:</b> <span style='color: #2d5be3;'>Administrateur Territorial</span></li>                            
                         </ul>
-                        <p style='font-size: 15px; color: #444; margin-top: 20px;'>Merci de changer votre mot de passe après votre première connexion pour garantir la sécurité de votre compte.</p>
+                        <p style='font-size: 15px; color: #444; margin-top: 20px;'>Vous devrez choisir un nouveau mot de passe lors de votre première connexion.</p>
                         <hr style='margin: 28px 0;'>
                         <p style='font-size: 13px; color: #999;'>Ceci est un message automatique. Merci de ne pas répondre directement à cet email.</p>
                     </div>
@@ -816,6 +876,7 @@ class CreateTerritorialAdminsFromExcel(APIView):
                         last_name=last_name,
                         email=email,
                         password=password,
+                        must_change_password=True,  # mot de passe généré : à changer à la 1re connexion
                         is_staff=True,
                         role=CustomUser.Roles.ADMIN_TERRITORIAL,
                     )
@@ -1226,6 +1287,7 @@ class CreateUserByTerritorialAdmin(APIView):
                     last_name=last_name,
                     email=email,
                     password=password,
+                    must_change_password=True,  # mot de passe généré : à changer à la 1re connexion
                     country=request.user.country,
                     role=role
                 )
@@ -1340,6 +1402,7 @@ class CreateUsersByTerritorialAdminFromExcel(APIView):
                         last_name=last_name,
                         email=email,
                         password=password,
+                        must_change_password=True,  # mot de passe généré : à changer à la 1re connexion
                         country=request.user.country,
                         role=role
                     )
@@ -1375,7 +1438,7 @@ class CreateUsersByTerritorialAdminFromExcel(APIView):
                 Mot de passe : {password}
                 Rôle : {role_label}
 
-                Merci de modifier votre mot de passe lors de votre première connexion.
+                Vous devrez choisir un nouveau mot de passe lors de votre première connexion.
             """,
             from_email=settings.EMAIL_HOST_USER,
             recipient_list=[user.email],
@@ -1392,7 +1455,7 @@ class CreateUsersByTerritorialAdminFromExcel(APIView):
                             <li><b>Mot de passe :</b> {password}</li>
                             <li><b>Rôle :</b> {role_label}</li>
                         </ul>
-                        <p>Merci de modifier votre mot de passe après votre première connexion.</p>
+                        <p>Vous devrez choisir un nouveau mot de passe lors de votre première connexion.</p>
                     </div>
                 </body>
                 </html>
