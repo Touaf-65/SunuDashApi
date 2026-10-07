@@ -5,8 +5,9 @@ from rest_framework.response import Response
 from rest_framework.exceptions import NotFound
 from rest_framework import status
 
-from .models import Country
-from .serializers import CountrySerializer
+from . import deactivation
+from .models import Country, CountryDeactivationRequest
+from .serializers import CountrySerializer, CountryDeactivationRequestSerializer
 from users.permissions import IsGlobalAdmin, IsSuperUser
 from users.utils import read_import_file
 
@@ -27,24 +28,21 @@ class CreateCountryView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        name_exists = Country.objects.filter(name__iexact=name).exists()
-        code_exists = Country.objects.filter(code__iexact=code).exists()
-
-        if name_exists and code_exists:
-            return Response(
-                {"error": f"Le pays '{name}' de code '{code}' existe déjà."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        elif name_exists:
-            return Response(
-                {"error": f"Un pays avec le nom '{name}' existe déjà."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        elif code_exists:
-            return Response(
-                {"error": f"Un pays avec le code '{code}' existe déjà."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        existing = (Country.objects.filter(name__iexact=name).first()
+                    or Country.objects.filter(code__iexact=code).first())
+        if existing is not None:
+            what = (f"Le pays '{name}' de code '{code}'" if existing.name.lower() == name.lower() and existing.code == code
+                    else f"Un pays avec le nom '{name}'" if existing.name.lower() == name.lower()
+                    else f"Un pays avec le code '{code}'")
+            if not existing.is_active:
+                # Un pays « supprimé » est en réalité désactivé : on l'indique et on oriente vers la réactivation
+                return Response(
+                    {"error": f"{what} existe déjà mais est désactivé ({existing.name}, {existing.code}) : "
+                              f"réactivez-le plutôt que de le recréer.",
+                     "inactive_country_id": existing.id},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            return Response({"error": f"{what} existe déjà."}, status=status.HTTP_400_BAD_REQUEST)
 
         serializer = CountrySerializer(data=request.data)
         if serializer.is_valid():
@@ -97,11 +95,14 @@ class CreateCountryFromExcel(APIView):
                 skipped_rows.append({'row': line, 'reason': "Nom ou code manquant."})
                 continue
 
-            if Country.objects.filter(name__iexact=name).exists():
-                skipped_rows.append({'row': line, 'reason': f"Un pays nommé « {name} » existe déjà."})
-                continue
-            if Country.objects.filter(code__iexact=code).exists():
-                skipped_rows.append({'row': line, 'reason': f"Un pays de code « {code} » existe déjà."})
+            existing = Country.objects.filter(name__iexact=name).first()
+            label = f"Un pays nommé « {name} »"
+            if existing is None:
+                existing = Country.objects.filter(code__iexact=code).first()
+                label = f"Un pays de code « {code} »"
+            if existing is not None:
+                inactive = "" if existing.is_active else " mais est désactivé : réactivez-le"
+                skipped_rows.append({'row': line, 'reason': f"{label} existe déjà{inactive}."})
                 continue
 
             data = {'name': name, 'code': code}  # nom nettoyé par le serializer
@@ -143,28 +144,42 @@ class CountryMixin:
                 return Country.objects.get(pk=pk, is_active=True)
             return Country.objects.get(pk=pk)
         except Country.DoesNotExist:
-            raise NotFound(detail="Country not found.")
+            raise NotFound(detail="Pays introuvable.")
 
 
 class ListCountriesView(APIView):
     """
-    View to list all countries.
-    - Global Admins: only active countries, without 'is_active' field.
-    - Superusers: all countries, with 'is_active' included.
+    View to list countries.
+    - Superusers: all countries.
+    - Global Admins: active countries by default (lists used to pick a country, e.g. when
+      assigning a territorial admin); ?include_inactive=true also returns deactivated
+      countries (country management page).
+    Each country carries 'pending_deactivation' (id + progress of the pending request, or null).
     """
     permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin]
 
     def get(self, request):
         user = request.user
+        include_inactive = request.query_params.get('include_inactive', '').lower() in ('1', 'true', 'yes')
 
-        if user.is_superuser_role():
-            countries = Country.objects.all()
-            serializer = CountrySerializer(countries, many=True)
-        else:
-            countries = Country.objects.filter(is_active=True)
-            serializer = CountrySerializer(countries, many=True)
-            
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        countries = Country.objects.all().order_by('name')
+        if not user.is_superuser_role() and not include_inactive:
+            countries = countries.filter(is_active=True)
+
+        deactivation.expire_overdue()
+        pending = {
+            r.country_id: r for r in CountryDeactivationRequest.objects
+            .filter(status=CountryDeactivationRequest.Status.PENDING).prefetch_related('votes')
+        }
+        data = CountrySerializer(countries, many=True).data
+        for item in data:
+            req = pending.get(item['id'])
+            item['pending_deactivation'] = None if req is None else {
+                'id': req.id,
+                'approvals': deactivation.tally(req)[0],
+                'required_approvals': req.required_approvals,
+            }
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class CountryDetailView(APIView, CountryMixin):
@@ -201,42 +216,91 @@ class CountryUpdateView(APIView, CountryMixin):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class CountryDeleteView(APIView, CountryMixin):
+class CountryDeactivateView(APIView):
     """
-    Soft-delete a country by setting its 'is_active' field to False.
-    Only allowed for Global Admins and only on active countries.
+    Désactivation d'un pays (jamais de suppression : clients, partenaires et sinistres
+    y sont rattachés). Corps : {"reason": "..."} (obligatoire).
+    - ADMIN_GLOBAL : crée une demande soumise au quorum des ADMIN_GLOBAL → 201.
+    - SUPERUSER    : désactive immédiatement (et clôt une éventuelle demande en cours) → 200.
+    Voir countries/deactivation.py pour les règles.
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin]
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin]
 
-    def delete(self, request, pk):
-        country = self.get_country(pk, request.user)
+    def post(self, request, pk):
+        country = Country.objects.filter(pk=pk).first()
+        if country is None:
+            raise NotFound("Pays introuvable.")
+        try:
+            req, applied = deactivation.request_or_deactivate(country, request.user, request.data.get('reason'))
+        except deactivation.DeactivationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not country.is_active:
-            return Response(
-                {"detail": "Country is already inactive."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        country.is_active = False
-        country.save()
-        return Response({"message": "Country has been deactivated."}, status=status.HTTP_200_OK)
+        data = CountryDeactivationRequestSerializer(req, context={'request': request}).data
+        if applied:
+            data['message'] = f"Le pays {country.name} a été désactivé."
+            return Response(data, status=status.HTTP_200_OK)
+        data['message'] = (f"Demande de désactivation de {country.name} créée : "
+                           f"{data['approvals']}/{req.required_approvals} validation(s). "
+                           f"Les autres administrateurs globaux et le SUPERUSER ont été notifiés.")
+        return Response(data, status=status.HTTP_201_CREATED)
 
 
 class CountryReactivateView(APIView):
+    """Réactivation d'un pays désactivé (ADMIN_GLOBAL ou SUPERUSER) : lève le gel de ses comptes."""
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin]
+
+    def post(self, request, pk):
+        country = Country.objects.filter(pk=pk).first()
+        if country is None:
+            raise NotFound("Pays introuvable.")
+        if not deactivation.reactivate(country, request.user):
+            return Response({"message": f"Le pays {country.name} est déjà actif."}, status=status.HTTP_200_OK)
+        return Response({"message": f"Le pays {country.name} a été réactivé."}, status=status.HTTP_200_OK)
+
+
+class DeactivationRequestListView(APIView):
     """
-    Allows a superuser to reactivate a previously deactivated country.
+    Demandes de désactivation. ?status=PENDING (défaut), APPROVED, REJECTED, EXPIRED,
+    CANCELLED ou ALL. ADMIN_GLOBAL et SUPERUSER.
     """
-    permission_classes = [IsAuthenticated, IsSuperUser]
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin]
+
+    def get(self, request):
+        deactivation.expire_overdue()
+        wanted = request.query_params.get('status', 'PENDING').upper()
+        requests = (CountryDeactivationRequest.objects.select_related('country', 'requested_by', 'decided_by')
+                    .prefetch_related('votes__admin'))
+        if wanted != 'ALL':
+            requests = requests.filter(status=wanted)
+        data = CountryDeactivationRequestSerializer(requests, many=True, context={'request': request}).data
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class DeactivationRequestActionView(APIView):
+    """
+    POST .../<id>/approve/  {"comment": "..."}  → validation (SUPERUSER : désactive)
+    POST .../<id>/reject/   {"comment": "..."}  → refus (SUPERUSER : clôt la demande)
+    POST .../<id>/cancel/                        → annulation (demandeur ou SUPERUSER)
+    """
+    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin]
+    action = None  # 'approve' | 'reject' | 'cancel', fixé dans urls.py
 
     def post(self, request, pk):
         try:
-            country = Country.objects.get(pk=pk)
-        except Country.DoesNotExist:
-            raise NotFound("Country not found.")
+            if self.action == 'cancel':
+                req = deactivation.cancel(pk, request.user)
+            else:
+                req = deactivation.vote(pk, request.user, approve=self.action == 'approve',
+                                        comment=request.data.get('comment', ''))
+        except deactivation.DeactivationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        if country.is_active:
-            return Response({"message": "Country is already active."}, status=status.HTTP_200_OK)
-
-        country.is_active = True
-        country.save()
-        return Response({"message": "Country has been reactivated."}, status=status.HTTP_200_OK)
+        req.refresh_from_db()
+        data = CountryDeactivationRequestSerializer(req, context={'request': request}).data
+        data['message'] = {
+            'APPROVED': f"Le pays {req.country.name} a été désactivé.",
+            'REJECTED': f"La demande de désactivation de {req.country.name} est refusée.",
+            'CANCELLED': f"La demande de désactivation de {req.country.name} est annulée.",
+            'PENDING': f"Votre avis est enregistré : {data['approvals']}/{req.required_approvals} validation(s).",
+        }.get(req.status, req.get_status_display())
+        return Response(data, status=status.HTTP_200_OK)

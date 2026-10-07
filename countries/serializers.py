@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Country
+from .models import Country, CountryDeactivationRequest
 
 
 def clean_label(value):
@@ -68,3 +68,64 @@ class CountrySerializer(serializers.ModelSerializer):
 
     def validate_currency_name(self, value):
         return clean_label(value) if value else value
+
+
+class CountryDeactivationRequestSerializer(serializers.ModelSerializer):
+    """Demande de désactivation, avec l'avancement du vote et ce que l'utilisateur connecté peut faire."""
+    country = CountrySerializer(read_only=True)
+    requested_by = serializers.SerializerMethodField()
+    decided_by = serializers.SerializerMethodField()
+    status_label = serializers.CharField(source='get_status_display', read_only=True)
+    approvals = serializers.SerializerMethodField()
+    rejections = serializers.SerializerMethodField()
+    votes = serializers.SerializerMethodField()
+    my_vote = serializers.SerializerMethodField()
+    can_vote = serializers.SerializerMethodField()
+    can_cancel = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CountryDeactivationRequest
+        fields = (
+            'id', 'country', 'reason', 'status', 'status_label', 'requested_by', 'decided_by',
+            'eligible_voters', 'required_approvals', 'approvals', 'rejections', 'votes',
+            'created_at', 'expires_at', 'decided_at', 'my_vote', 'can_vote', 'can_cancel',
+        )
+
+    @staticmethod
+    def _person(user):
+        return {'id': user.id, 'name': f"{user.first_name} {user.last_name}".strip(), 'email': user.email} if user else None
+
+    def _user(self):
+        return self.context['request'].user
+
+    def get_requested_by(self, obj):
+        return self._person(obj.requested_by)
+
+    def get_decided_by(self, obj):
+        return self._person(obj.decided_by)
+
+    def get_approvals(self, obj):
+        return sum(v.decision == 'APPROVE' for v in obj.votes.all())
+
+    def get_rejections(self, obj):
+        return sum(v.decision == 'REJECT' for v in obj.votes.all())
+
+    def get_votes(self, obj):
+        return [{'admin': self._person(v.admin), 'decision': v.decision, 'comment': v.comment,
+                 'created_at': v.created_at} for v in obj.votes.all()]
+
+    def get_my_vote(self, obj):
+        vote = next((v for v in obj.votes.all() if v.admin_id == self._user().pk), None)
+        return vote.decision if vote else None
+
+    def get_can_vote(self, obj):
+        user = self._user()
+        if obj.status != 'PENDING':
+            return False
+        if user.is_superuser_role():
+            return True
+        return user.is_admin_global() and self.get_my_vote(obj) is None
+
+    def get_can_cancel(self, obj):
+        user = self._user()
+        return obj.status == 'PENDING' and (obj.requested_by_id == user.pk or user.is_superuser_role())
