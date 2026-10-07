@@ -2,7 +2,6 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager, Permission
 from django.utils import timezone
 from countries.models import Country
-import random
 import uuid
 
 from django.contrib.auth.models import PermissionsMixin
@@ -21,11 +20,10 @@ class CustomUserManager(BaseUserManager):
         return user
 
     def generate_unique_username(self, first_name, last_name):
-        base_username = f"{first_name.lower()}.{last_name.lower()}"
-        username = base_username
-        while self.model.objects.filter(username=username).exists():
-            username = f"{base_username}{random.randint(1, 999)}"
-        return username
+        # « prenom.nom » sans accent ni espace (ex. « Komlan Agbéko » → « komlan.agbeko »)
+        from .utils import build_username
+        return build_username(first_name, last_name,
+                              exists=lambda u: self.model.objects.filter(username__iexact=u).exists())
 
     def create_superuser(self, first_name, last_name, email, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)

@@ -30,7 +30,8 @@ from django.db import transaction
 
 from django.contrib.auth import get_user_model
 
-from .utils import generate_password, send_user_email, read_import_file
+from .utils import (generate_password, send_user_email, read_import_file,
+                    validate_account_email, INVALID_EMAIL_MESSAGE)
 from .email_service import EmailService
 from .authentication import INACTIVE_COUNTRY_MESSAGE
 from .tasks import (
@@ -67,11 +68,11 @@ class SuperuserCreateAPIView(APIView):
         last_name = request.data.get('last_name')
         email = request.data.get('email')
 
-        # Validate email format
+        # Validate email format (ASCII only: no accented address)
         try:
-            validate_email(email)
+            email = validate_account_email(email)
         except ValidationError:
-            return Response({'detail': 'Adresse email invalide.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': INVALID_EMAIL_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
 
         # Generate a random password
         password = generate_password()
@@ -446,11 +447,11 @@ class CreateGlobalAdminView(APIView):
         if not (first_name and last_name and email):
             return Response({'error': 'Champs requis manquants.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Validate email format
+        # Validate email format (ASCII only: no accented address)
         try:
-            validate_email(email)
+            email = validate_account_email(email)
         except ValidationError:
-            return Response({'error': 'Adresse e-mail invalide.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': INVALID_EMAIL_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
 
         # Check for existing user
         if CustomUser.objects.filter(email=email).exists():
@@ -541,9 +542,9 @@ class CreateAdminGlobalFromFileView(APIView):
             first_name = str(row['first_name']).strip()
             last_name = str(row['last_name']).strip()
 
-            # Validate email
+            # Validate email (ASCII only: no accented address)
             try:
-                validate_email(email)
+                email = validate_account_email(email)
             except ValidationError:
                 ignored_count += 1
                 continue
@@ -740,6 +741,14 @@ class CreateTerritorialAdminView(APIView):
             if not (first_name and last_name and email):
                 return Response({'error': 'Champs manquants requis'}, status=status.HTTP_400_BAD_REQUEST)
 
+            # Validate email format (ASCII only: no accented address)
+            try:
+                email = validate_account_email(email)
+            except ValidationError:
+                return Response({'error': INVALID_EMAIL_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
+            if CustomUser.objects.filter(email__iexact=email).exists():
+                return Response({'error': "Un utilisateur avec cet e-mail existe déjà."}, status=status.HTTP_409_CONFLICT)
+
             password = generate_password(length=8)
 
             # Create the account and send its credentials atomically: if the email cannot be
@@ -852,9 +861,9 @@ class CreateTerritorialAdminsFromExcel(APIView):
             last_name = str(row['lastname']).strip()
             email = str(row['email']).strip().lower()
 
-            # Skip invalid emails and rows without first or last name (empty cells are read as NaN)
+            # Skip invalid emails (incl. accented ones) and rows without first or last name (empty cells are read as NaN)
             try:
-                validate_email(email)
+                email = validate_account_email(email)
             except ValidationError:
                 ignored_count += 1
                 continue
@@ -1270,7 +1279,13 @@ class CreateUserByTerritorialAdmin(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if CustomUser.objects.filter(email=email).exists():
+        # Validate email format (ASCII only: no accented address)
+        try:
+            email = validate_account_email(email)
+        except ValidationError:
+            return Response({"error": INVALID_EMAIL_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
+
+        if CustomUser.objects.filter(email__iexact=email).exists():
             return Response(
                 {"error": "Un utilisateur avec cet email existe déjà."},
                 status=status.HTTP_400_BAD_REQUEST
@@ -1374,9 +1389,11 @@ class CreateUsersByTerritorialAdminFromExcel(APIView):
             email = str(row['email']).strip().lower()
             raw_role = row['role']
 
-            if not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', email):
+            try:
+                email = validate_account_email(email)
+            except ValidationError:
                 ignored_count += 1
-                continue  # skip invalid email
+                continue  # skip invalid email (incl. accented ones)
 
             # Skip rows without first or last name (empty cells are read as NaN)
             if pd.isna(row['firstname']) or pd.isna(row['lastname']) or not first_name or not last_name:

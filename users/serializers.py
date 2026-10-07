@@ -1,5 +1,7 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from .models import CustomUser, PasswordResetToken
+from .utils import validate_account_email, INVALID_EMAIL_MESSAGE
 from countries.models import Country
 
 
@@ -18,6 +20,21 @@ class UserSerializer(serializers.ModelSerializer):
             'country', 'role', 'is_active'
         )
         read_only_fields = ('username',)
+        # Le contrôle de format de DRF passe avant validate_email : même message, en français
+        extra_kwargs = {'email': {'error_messages': {'invalid': INVALID_EMAIL_MESSAGE}}}
+
+    def validate_email(self, value):
+        """Adresse ASCII uniquement (pas d'accent) et unique sans tenir compte de la casse."""
+        try:
+            value = validate_account_email(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.messages[0])
+        duplicates = CustomUser.objects.filter(email__iexact=value)
+        if self.instance is not None:
+            duplicates = duplicates.exclude(pk=self.instance.pk)
+        if duplicates.exists():
+            raise serializers.ValidationError("Un utilisateur avec cet e-mail existe déjà.")
+        return value
 
     def validate_role(self, value):
         """

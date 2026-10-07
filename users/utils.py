@@ -1,13 +1,70 @@
 import csv
 import io
 import random
+import re
 import string
+import unicodedata
 
 import pandas as pd
+from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
+from django.core.validators import validate_email
 from django.conf import settings
 
 ACCEPTED_IMPORT_FORMATS = ".xlsx, .xls, .csv"
+
+INVALID_EMAIL_MESSAGE = (
+    "Adresse e-mail invalide : vérifiez sa saisie (les lettres accentuées, espaces "
+    "et caractères spéciaux ne sont pas acceptés)."
+)
+
+
+# Lettres qui ne se décomposent pas en « lettre + accent » (sinon elles disparaîtraient)
+_TRANSLITERATION = str.maketrans({
+    'ø': 'o', 'Ø': 'O', 'æ': 'ae', 'Æ': 'AE', 'œ': 'oe', 'Œ': 'OE', 'ß': 'ss',
+    'đ': 'd', 'Đ': 'D', 'ł': 'l', 'Ł': 'L', 'þ': 'th', 'Þ': 'TH', 'ð': 'd', 'Ð': 'D',
+})
+
+
+def ascii_slug(text):
+    """
+    « Agbéko » → « agbeko », « N'Guessan » → « nguessan », « Jean Marc » → « jean-marc »,
+    « Œdipe » → « oedipe ». Accents retirés, minuscules, apostrophes supprimées, tout autre
+    caractère remplacé par un tiret.
+    """
+    text = str(text or '').translate(_TRANSLITERATION)
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+    text = re.sub(r"['’`]", '', text.lower())
+    return re.sub(r'[^a-z0-9]+', '-', text).strip('-')
+
+
+def build_username(first_name, last_name, exists):
+    """
+    Identifiant « prenom.nom » sans accent ni espace. En cas de doublon, un nombre aléatoire
+    entre 1 et 999 est ajouté (« prenom.nom482 »), tiré à nouveau tant que l'identifiant est pris.
+    `exists(username)` indique si un identifiant est déjà pris.
+    """
+    base = f"{ascii_slug(first_name) or 'utilisateur'}.{ascii_slug(last_name) or 'compte'}"[:140]
+    username = base
+    while exists(username):
+        username = f"{base}{random.randint(1, 999)}"
+    return username
+
+
+def validate_account_email(value):
+    """
+    Adresse e-mail d'un compte : ASCII uniquement (pas d'accent, ni dans la partie locale
+    ni dans le domaine) et format valide. Renvoie l'adresse sans espaces autour.
+    Lève ValidationError (message en français) sinon.
+    """
+    value = str(value or '').strip()
+    if not value or not value.isascii():
+        raise ValidationError(INVALID_EMAIL_MESSAGE)
+    try:
+        validate_email(value)
+    except ValidationError:
+        raise ValidationError(INVALID_EMAIL_MESSAGE)
+    return value
 
 
 def read_import_file(file):
