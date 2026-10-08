@@ -1,167 +1,263 @@
-# Documentation Technique & Fonctionnelle
+# SunuDash — API
 
-## Modules : `file_handling` & `importer`
+API du tableau de bord d'analyse d'assurance santé **SunuDash** (multi-pays).
+Django 5.1 · Django REST Framework · JWT (SimpleJWT) · PostgreSQL 16 · Celery + Redis · pandas.
 
----
-
-## 1. Processus d’Upload de Fichiers
-
-### API d’Upload
-- **Endpoint** : `/api/import/upload/` (à adapter selon vos routes)
-- **Vue principale** : `FileUploadAndImportView` (`importer/views.py`)
-- **Méthode** : `POST`
-- **Payload attendu** :
-  - `stat_file` (Excel/CSV)
-  - `recap_file` (Excel/CSV)
-- **Permissions** : Utilisateur authentifié, rôle admin territorial ou chef technique.
-
-### Étapes côté backend
-1. **Vérification** de la présence des deux fichiers et du pays de l’utilisateur.
-2. **Lecture** des fichiers via `open_excel_csv`.
-3. **Validation** des entêtes attendues (headers) pour chaque fichier.
-4. **Création** des objets `File` (modèle `file_handling.models.File`) pour chaque fichier uploadé.
-5. **Création d’une session d’import** (`ImportSession`) qui relie les deux fichiers, l’utilisateur, le pays, et initialise le statut à `PENDING`.
+> Ce document décrit ce qui est **en place et vérifié** : installation locale, rôles, authentification,
+> gestion des comptes et des pays. La chaîne d'**import des sinistres** est en cours de refonte
+> (voir [État des modules](#état-des-modules)) ; son ancienne documentation, en partie obsolète,
+> est conservée dans `README2.md`.
 
 ---
 
-## 2. Gestion & Suivi de la Session d’Import
+## Sommaire
 
-### Modèle principal : `ImportSession`
-- **Champs clés** :
-  - `user`, `country`
-  - `stat_file`, `recap_file`
-  - `status` : `PENDING`, `PROCESSING`, `DONE`, `ERROR`, `DONE_WITH_ERRORS`
-  - `created_at`, `started_at`, `completed_at`
-  - `error_file`, `log_file_path`, `message`
-  - **Statistiques** : `insured_created_count`, `claims_created_count`, `total_claimed_amount`, `total_reimbursed_amount`
-- **Tracking** :
-  - Chaque session d’import a un identifiant unique.
-  - Les fichiers sont liés à la session.
-  - Les logs et erreurs sont stockés et accessibles via des URLs générées.
-
-### Sérialisation
-- **FileSerializer** et **ImportSessionSerializer** exposent toutes les informations nécessaires pour le frontend, y compris les URLs pour télécharger les logs ou les rapports d’erreur.
+1. [Installation locale](#installation-locale)
+2. [Configuration (`.env`)](#configuration-env)
+3. [Rôles et périmètres](#rôles-et-périmètres)
+4. [Authentification](#authentification)
+5. [Création et gestion des comptes](#création-et-gestion-des-comptes)
+6. [Imports de comptes et de pays (Excel / CSV)](#imports-de-comptes-et-de-pays-excel--csv)
+7. [Gestion des pays](#gestion-des-pays)
+8. [E-mails envoyés](#e-mails-envoyés)
+9. [Référence des routes](#référence-des-routes)
+10. [Codes de réponse à connaître](#codes-de-réponse-à-connaître)
+11. [État des modules](#état-des-modules)
 
 ---
 
-## 3. Déroulement du Processus d’Import
+## Installation locale
 
-### Pipeline principal (`ImporterService`)
-1. **Création de la session et des fichiers**.
-2. **Ouverture et nettoyage** des fichiers (suppression des lignes/colonnes vides, normalisation).
-3. **Recherche de la période commune** entre les deux fichiers.
-4. **Comparaison** des données (détection des non-conformités).
-5. **Si données valides** : déclenchement d’une tâche asynchrone pour le mapping et l’import réel (via Celery).
+Prérequis : **Python 3.11**, **Docker Desktop** (PostgreSQL + Redis), Git.
 
----
+```powershell
+# 1. Environnement Python
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 
-## 4. Tâche Asynchrone & Tracking du Mapping
+# 2. Configuration : copier le modèle puis renseigner les valeurs (voir ci-dessous)
+copy .env.example .env
 
-### Tâche Celery : `async_import_data`
-- **Déclenchée** par `ImporterService.trigger_async_import()`.
-- **Étapes** :
-  1. Création d’un DataFrame à partir des données valides.
-  2. Initialisation du `DataMapper`.
-  3. **Mapping** des données ligne par ligne avec logs détaillés à chaque étape (création des objets, erreurs, etc.).
-  4. Mise à jour du statut de la session (`PROCESSING` → `DONE` ou `ERROR`).
-  5. **Logging** : chaque étape du mapping est loggée via `ImportLoggerService` (fichier de log lié à la session).
+# 3. Base de données et Redis
+docker compose up -d
 
-### Tracking en temps réel
-- **Oui, c’est possible** :
-  - Les logs sont écrits dans un fichier (`log_file_path` dans `ImportSession`).
-  - Le frontend peut interroger périodiquement l’API pour récupérer le statut de la session (`status`) et, si besoin, afficher le contenu du log (via l’URL fournie par le serializer).
-  - Les étapes du mapping sont tracées (début, fin, erreurs, nombre de lignes traitées, etc.).
-  - Les erreurs et rapports sont téléchargeables.
+# 4. Schéma de la base
+python manage.py migrate
 
----
-
-## 5. Endpoints & Objets pour le Frontend
-
-### Pour lister les fichiers
-- `/api/files/` : Liste des fichiers uploadés, filtrés par pays.
-
-### Pour suivre une session d’import
-- `/api/import-sessions/<id>/` : Détail d’une session (statut, fichiers, logs, erreurs, statistiques…)
-- `/api/import-sessions/<id>/download/?type=log` : Télécharger le log de la session.
-- `/api/import-sessions/<id>/download/?type=error` : Télécharger le rapport d’erreur.
-
-### Exemple de réponse ImportSession
-```json
-{
-  "id": 12,
-  "user": "john.kodjo",
-  "country": "Senegal",
-  "stat_file": { ... },
-  "recap_file": { ... },
-  "status": "PROCESSING",
-  "created_at": "...",
-  "started_at": "...",
-  "completed_at": null,
-  "error_file": null,
-  "message": null,
-  "error_file_url": null,
-  "log_file_url": "https://.../import-sessions/12/download/?type=log"
-}
+# 5. Lancer l'API (http://127.0.0.1:8000)
+python manage.py runserver
 ```
 
----
-
-## 6. Tracking du mapping et avancement pour l’UI/UX
-
-- **Statut de la session** : à afficher en temps réel (polling ou websocket).
-- **Logs détaillés** : possibilité d’afficher un “journal d’import” à l’utilisateur.
-- **Statistiques d’avancement** : nombre de lignes traitées, erreurs, objets créés, etc.
-- **Téléchargement des rapports** : accès direct aux fichiers d’erreur ou de log.
-- **Affichage des erreurs** : messages clairs pour chaque étape échouée.
+- Sans `DATABASE_URL`, l'API retombe sur le fichier SQLite `db.sqlite3`.
+- **Windows Defender** (« Accès contrôlé aux dossiers ») peut empêcher Python d'écrire dans `Documents` :
+  autoriser `python.exe` (Python 3.11) dans la protection contre les ransomware, ou placer le projet hors de `Documents`.
+- Les tâches d'import utilisent **Celery** : en local, lancer un worker si nécessaire
+  (`celery -A sunu_dash worker -l info --pool=solo` sous Windows).
 
 ---
 
-## 7. Recommandations UI/UX
+## Configuration (`.env`)
 
-- **Progress bar** basée sur le statut et les logs.
-- **Timeline** des étapes (upload, validation, mapping, terminé/erreur).
-- **Affichage dynamique** des logs (console ou panneau latéral).
-- **Boutons de téléchargement** pour les rapports/logs.
-- **Alertes/notifications** en cas d’erreur ou de succès.
+Le fichier `.env` n'est **jamais versionné** ; `.env.example` sert de modèle.
 
----
-
-## 8. Tracking du mapping dans la tâche asynchrone
-
-**Oui, c’est faisable et déjà en partie implémenté** :
-- Le mapping (`DataMapper.map_data`) logge chaque étape dans un fichier.
-- Le frontend peut lire ce log pour afficher l’avancement (nombre de lignes, erreurs, étapes franchies).
-- Pour un tracking encore plus “live”, il est possible d’ajouter des endpoints pour lire le log en streaming ou d’utiliser des websockets.
-
----
-
-## 9. Résumé du flux global
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Frontend
-    participant Backend
-    participant Celery
-
-    User->>Frontend: Sélectionne et upload 2 fichiers
-    Frontend->>Backend: POST /import/upload (stat_file, recap_file)
-    Backend->>Backend: Validation, création ImportSession
-    Backend->>Celery: Lance tâche async_import_data
-    Celery->>Backend: Mapping, logs, maj statut ImportSession
-    Frontend->>Backend: GET /import-sessions/<id> (polling)
-    Backend->>Frontend: Statut, logs, erreurs, stats
-    Frontend->>User: Affiche avancement, logs, erreurs, liens de téléchargement
-```
+| Variable | Rôle |
+|---|---|
+| `DJANGO_SECRET_KEY` | **Obligatoire** (l'API refuse de démarrer sans). Générer : `python -c "from django.core.management.utils import get_random_secret_key as g; print(g())"` |
+| `DJANGO_DEBUG` | `True` en local uniquement ; `False` par défaut |
+| `DJANGO_ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS` | Hôtes autorisés, origines du frontend (ex. `http://localhost:4200`) |
+| `DATABASE_URL` | Ex. `postgres://sunudash:<mot_de_passe>@localhost:5432/sunudash` |
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Utilisés par `docker-compose.yml` |
+| `FRONTEND_URL` | Base des liens envoyés par e-mail (ex. `http://localhost:4200` en local) |
+| `EMAIL_BACKEND` | En local : `django.core.mail.backends.console.EmailBackend` (les e-mails s'affichent dans le terminal, rien n'est envoyé) |
+| `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` | Serveur SMTP en production |
+| `CELERY_BROKER_URL` | Redis, ex. `redis://localhost:6379/0` |
 
 ---
 
-## 10. Pour aller plus loin
+## Rôles et périmètres
 
-- Ajouter un endpoint pour lire le log en temps réel (streaming).
-- Utiliser des websockets pour push l’avancement.
-- Ajouter des métriques plus fines (progression en %).
+| Rôle | Périmètre | Peut notamment |
+|---|---|---|
+| `SUPERUSER` | Administration des comptes (pas de statistiques) | Gérer les **admins globaux** ; désactiver un pays **immédiatement** ; trancher une demande de désactivation ; réactiver un pays |
+| `ADMIN_GLOBAL` | Tous les pays | Gérer les **pays** ; gérer les **admins territoriaux** et leur affectation ; **demander** la désactivation d'un pays (quorum) ; réactiver un pays |
+| `ADMIN_TERRITORIAL` | **Son pays** | Gérer les **utilisateurs** de son pays (`CHEF_DEPT_TECH`, `RESP_OPERATEUR`) |
+| `CHEF_DEPT_TECH` | Son pays | — |
+| `RESP_OPERATEUR` | Son pays | — |
+
+- Un admin territorial **sans pays affecté** n'a accès à aucun utilisateur.
+- **Gel d'un pays désactivé** : les comptes rattachés à un pays désactivé (admin territorial, chef de département,
+  opérateurs) n'ont plus accès à rien, y compris avec un jeton obtenu avant la désactivation
+  (401, code `country_inactive`) ; leur connexion est refusée avec ce motif. Ils ne sont pas supprimés :
+  tout revient à la réactivation du pays.
 
 ---
 
-**Ce document est destiné à guider le design UI/UX et l’intégration frontend pour un suivi optimal du processus d’import.**
+## Authentification
+
+- **Jetons JWT** (`access_token` valable 12 h) obtenus par `POST /auth/login/` avec `{"login": "<identifiant ou e-mail>", "password": "…"}`.
+  L'identifiant et l'e-mail sont acceptés, sans tenir compte de la casse.
+- Toutes les routes protégées passent par `users.authentication.ActiveCountryJWTAuthentication`
+  (authentification par défaut de DRF), qui ajoute :
+  1. le **gel des comptes d'un pays désactivé** (401 `country_inactive`) ;
+  2. le **changement de mot de passe obligatoire** à la première connexion (voir ci-dessous).
+- **Routes publiques** (connexion, mot de passe oublié, confirmation, création du premier superuser) :
+  elles ignorent l'en-tête `Authorization` — un jeton absent ou expiré envoyé par le navigateur ne provoque pas de 401.
+- `GET /auth/getConnectedUser/<login>/` : **profil de l'utilisateur connecté uniquement** (404 pour tout autre compte,
+  sans révéler s'il existe).
+- `POST /auth/verify_password/` : confirmation par mot de passe avant une action sensible ;
+  répond **200 `true`/`false`** (jamais 401 pour un mauvais mot de passe : la session reste ouverte).
+
+### Mot de passe provisoire → changement obligatoire
+
+- Tout compte **créé ou importé** reçoit un mot de passe généré, envoyé par e-mail, et le marqueur
+  `must_change_password`.
+- Tant qu'il n'est pas levé, **toute route** répond **403 `password_change_required`**, sauf
+  `POST /auth/change_password/` et la lecture de son propre profil. La connexion renvoie `must_change_password: true`.
+- `POST /auth/change_password/` : `{"old_password", "new_password", "confirm_password"}` ;
+  règles de sécurité de Django (messages en français : trop court, trop courant, entièrement numérique…),
+  nouveau différent de l'actuel, e-mail de confirmation **sans** le mot de passe.
+- « **Mot de passe oublié** » (`password_reset` → lien `FRONTEND_URL/auth/new-password/<jeton>/`, valable 24 h,
+  à usage unique → `password_reset_confirm`) lève aussi le marqueur.
+
+---
+
+## Création et gestion des comptes
+
+| Qui | Crée / gère | Règles |
+|---|---|---|
+| Personne (une seule fois) | Premier `SUPERUSER` (`/auth/create_superuser/`) | Refusé dès qu'un superuser existe |
+| `SUPERUSER` | `ADMIN_GLOBAL` | Création unitaire ou import ; modification nom/e-mail ; activation/désactivation ; suppression |
+| `ADMIN_GLOBAL` | `ADMIN_TERRITORIAL` | Idem + **affectation** à un pays actif, réaffectation, désaffectation |
+| `ADMIN_TERRITORIAL` | `CHEF_DEPT_TECH`, `RESP_OPERATEUR` **de son pays** | Idem ; **changement de rôle** entre ces deux rôles uniquement |
+
+Règles communes à toutes les créations :
+- **Le compte n'est créé que si l'e-mail d'identifiants part** : en cas d'échec d'envoi, la création est annulée (503 en
+  création unitaire ; ligne listée dans `echecs_envoi_email` à l'import, qui continue).
+- **Identifiant** généré : `prenom.nom` **sans accent ni espace** (« Komlan Agbéko » → `komlan.agbeko`,
+  « Jean Marc N'Guessan » → `jean-marc.nguessan`) ; en cas d'homonyme, **nombre aléatoire 1-999** ajouté
+  (`komlan.agbeko254`). Le nom affiché garde ses accents.
+- **E-mail** : ASCII uniquement (aucun accent, ni dans la partie locale ni dans le domaine) et format valide ;
+  unique sans tenir compte de la casse. Même contrôle à la modification.
+- Création avec un e-mail déjà utilisé → **409**.
+- **Rôles** : un changement de rôle est refusé par défaut ; seule la mise à jour des utilisateurs simples autorise
+  `CHEF_DEPT_TECH` ↔ `RESP_OPERATEUR`. Aucune route ne permet de promouvoir un compte en admin ou superuser.
+- **Activation / désactivation** (`/auth/users/<id>/toggle-active/`) : SUPERUSER → admins globaux ;
+  ADMIN_GLOBAL → admins territoriaux ; ADMIN_TERRITORIAL → utilisateurs de son pays.
+  Un compte désactivé ne peut plus se connecter.
+
+---
+
+## Imports de comptes et de pays (Excel / CSV)
+
+Formats acceptés : **`.xlsx`, `.xls`, `.csv`** (`users.utils.read_import_file`).
+CSV : UTF-8 (avec ou sans BOM) ou **Windows-1252** (Excel français) ; séparateur `;`, `,` ou tabulation détecté ;
+cellules vides respectées ; espaces des en-têtes ignorés.
+
+| Import | Route | Colonnes |
+|---|---|---|
+| Admins globaux (SUPERUSER) | `/auth/global_admins/import_create/` | `first_name`, `last_name`, `email`, `role` (facultatif : seules les variantes de « Administrateur Global » sont retenues) |
+| Admins territoriaux (ADMIN_GLOBAL) | `/auth/territorial_admins/import_create/` | `firstname`, `lastname`, `email` |
+| Utilisateurs (ADMIN_TERRITORIAL) | `/auth/territorial_admins/users/import_create_user/` | `firstname`, `lastname`, `email`, `role` (« Chef Département Technique », « chef », « Responsable Opérateur (de Saisie) », « ops »…) |
+| Pays (ADMIN_GLOBAL) | `/countries/import_create/` | `name`, `code`, `currency_code` et `currency_name` (facultatifs, défaut XOF / F CFA) |
+
+Réponse type : `message`, `created_count`, `lignes_ignores`, `echecs_envoi_email` (comptes) ou `skipped_rows`
+(pays : numéro de ligne + raison). Réimporter le même fichier ne crée que ce qui manque.
+Fichier vide, illisible, mal nommé ou sans les bonnes colonnes → **400** avec un message en français.
+
+---
+
+## Gestion des pays
+
+- **Création / modification** (ADMIN_GLOBAL) : code de 1 à 4 lettres, en majuscules ; **nom et code uniques sans tenir
+  compte de la casse ni des espaces**, garantis aussi par la base (index sur `LOWER(TRIM(name))` et `LOWER(TRIM(code))`) ;
+  noms conservés **tels que saisis** (espaces nettoyés, première lettre en majuscule : « Côte d'Ivoire », « F CFA »).
+- **Liste** : le SUPERUSER voit tous les pays ; l'ADMIN_GLOBAL voit les pays actifs par défaut
+  (listes de choix) et tous avec `?include_inactive=true` (page de gestion). Chaque pays porte
+  `pending_deactivation` (avancement d'une demande en cours, ou `null`).
+- **Un pays n'est jamais supprimé** (clients, partenaires et sinistres y sont rattachés) : il est **désactivé**.
+
+### Désactivation d'un pays (motif + quorum)
+
+| Étape | Règle |
+|---|---|
+| Demande | Un ADMIN_GLOBAL demande la désactivation avec un **motif obligatoire** ; sa demande compte comme une validation |
+| Quorum | **2** validations s'il y a au plus 3 ADMIN_GLOBAL actifs, **3** au-delà (figé à la création de la demande) |
+| Avis | Chaque ADMIN_GLOBAL valide ou refuse une fois (commentaire facultatif) |
+| Refus | La demande est refusée dès que les refus rendent le quorum impossible |
+| Expiration | 7 jours sans quorum (passage à « expirée » à la consultation suivante) |
+| Annulation | Par le demandeur |
+| SUPERUSER | Désactive **immédiatement** (motif obligatoire) ; peut valider ou refuser toute demande ; seul recours s'il n'y a qu'un ADMIN_GLOBAL |
+| Réactivation | ADMIN_GLOBAL ou SUPERUSER ; lève le gel des comptes du pays |
+| Notifications | E-mail à chaque étape aux autres ADMIN_GLOBAL et au SUPERUSER |
+
+- Une seule demande en attente par pays ; impossible d'affecter un admin territorial à un pays désactivé.
+- Recréer un pays désactivé → 400 « … existe déjà mais est désactivé : réactivez-le plutôt que de le recréer ».
+- Règles centralisées dans `countries/deactivation.py`.
+
+---
+
+## E-mails envoyés
+
+| Événement | Destinataire | Contenu |
+|---|---|---|
+| Création d'un compte | Le nouveau compte | Identifiant, mot de passe provisoire, obligation de le changer à la 1re connexion |
+| Connexion réussie | L'utilisateur | Date, adresse IP |
+| Mot de passe oublié | L'utilisateur | Lien de réinitialisation (24 h) |
+| Mot de passe modifié / réinitialisé | L'utilisateur | Confirmation, **sans** le mot de passe |
+| Affectation / réaffectation à un pays | L'admin territorial | Pays concerné |
+| Désactivation de pays (demande, avis, décision, refus, annulation, expiration) | Autres ADMIN_GLOBAL + SUPERUSER | Pays, motif, avancement du quorum |
+
+Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
+
+---
+
+## Référence des routes
+
+### Authentification et comptes — `/auth/`
+| Méthode | Route | Accès |
+|---|---|---|
+| POST | `login/` | Public |
+| POST | `password_reset/`, `password_reset_confirm/` | Public |
+| POST | `create_superuser/` | Public, une seule fois |
+| GET | `getConnectedUser/<login>/` | Connecté (son propre profil) |
+| POST | `verify_password/`, `change_password/` | Connecté |
+| POST | `users/<id>/toggle-active/` | Selon le rôle (voir plus haut) |
+| GET / POST / PUT / DELETE | `global_admins/list/`, `create/`, `import_create/`, `<id>/`, `<id>/update/`, `<id>/delete/` | SUPERUSER |
+| GET / POST / PUT / DELETE | `territorial_admins/list/`, `create/`, `import_create/`, `<id>/`, `<id>/update/`, `<id>/delete/`, `assign/`, `change_assign/` | ADMIN_GLOBAL |
+| GET / POST / PUT / DELETE | `territorial_admins/users/list/`, `create_user/`, `import_create_user/`, `<id>/`, `<id>/update/`, `<id>/delete/` | ADMIN_TERRITORIAL avec pays |
+
+### Pays — `/countries/`
+| Méthode | Route | Accès |
+|---|---|---|
+| GET | `list/` (`?include_inactive=true`), `<id>/` | SUPERUSER, ADMIN_GLOBAL |
+| POST / PUT | `create/`, `import_create/`, `<id>/update/` | ADMIN_GLOBAL |
+| POST | `<id>/deactivate/` (`{"reason"}`) | ADMIN_GLOBAL (demande) ou SUPERUSER (immédiat) |
+| POST | `<id>/restore/` | ADMIN_GLOBAL, SUPERUSER |
+| GET | `deactivation-requests/` (`?status=PENDING` par défaut, ou `ALL`…) | ADMIN_GLOBAL, SUPERUSER |
+| POST | `deactivation-requests/<id>/approve/`, `reject/` (`{"comment"}`), `cancel/` | ADMIN_GLOBAL, SUPERUSER |
+
+---
+
+## Codes de réponse à connaître
+
+| Code | Signification | Réaction attendue du frontend |
+|---|---|---|
+| 401 | Non connecté, jeton invalide/expiré, compte désactivé, **pays désactivé** (`code: country_inactive`) | Retour à la connexion |
+| 403 `password_change_required` | Mot de passe provisoire pas encore changé | Redirection vers le changement de mot de passe (session conservée) |
+| 403 | Action interdite pour ce rôle | Afficher l'erreur, **sans** déconnecter |
+| 409 | E-mail déjà utilisé | Afficher le motif |
+| 503 | Compte non créé : l'e-mail d'identifiants n'a pas pu partir | Réessayer plus tard |
+| 204 | Suppression réussie (réponse **sans corps**) | — |
+
+---
+
+## État des modules
+
+| Module | État |
+|---|---|
+| Comptes, authentification, rôles | ✅ Revu et testé (tests de bout en bout par HTTP réel) |
+| Pays (y compris désactivation au quorum et gel) | ✅ Revu et testé |
+| Fichiers et import des sinistres (`file_handling`, `importer`) | 🔧 **En cours de refonte** : sécurité des fichiers, fiabilité des sessions d'import, rapports de non-conformité |
+| Multi-devises | 📐 Conception arrêtée (devises par pays, taux datés saisis par les admins, devise choisie à l'import) — à développer |
+| Tableaux de bord et statistiques (`dashboard`) | ⏳ À revoir |
