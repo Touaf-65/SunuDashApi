@@ -1,114 +1,154 @@
-from django.shortcuts import render, get_object_or_404
-from django.http import FileResponse
+import json
+import os
+
+from django.db import transaction
+from django.http import FileResponse, Http404
+from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.parsers import JSONParser
-from .models import File, ImportSession
-from core.models import Claim
-from .serializers import FileSerializer, ImportSessionSerializer
-from users.permissions import IsTerritorialAdmin, IsTerritorialAdminAndAssignedCountry, IsChefDeptTech
-from importer.utils.functions import open_excel_csv
-import pandas as pd
 
-import os
+from .models import File
+from .serializers import FileSerializer, ImportSessionSerializer
+from .access import (
+    CanAccessCountryFiles, files_for, sessions_for, session_of_file, can_delete,
+    stored_paths, file_paths, remove_paths, DELETE_FORBIDDEN_MESSAGE,
+)
+from importer.utils.functions import open_excel_csv
+
+# Toutes les vues : AT ou CDT avec un pays, et uniquement les fichiers / sessions de ce pays
+# (hors de ce périmètre : 404, comme si l'objet n'existait pas).
+FILE_PERMISSIONS = [IsAuthenticated, CanAccessCountryFiles]
+
+
+def _open_stored(field_file):
+    try:
+        return field_file.open('rb')
+    except (FileNotFoundError, ValueError):
+        raise Http404("Le fichier n'est plus disponible sur le serveur.")
+
+
+def _delete_session(session):
+    """Supprime la session entière (fichiers stat + récap, rapport, journal).
+    Les données importées restent en base, détachées du fichier (on_delete=SET_NULL)."""
+    paths = stored_paths(session)
+    stat_file, recap_file = session.stat_file, session.recap_file
+    with transaction.atomic():
+        session.delete()
+        File.objects.filter(pk__in=[stat_file.pk, recap_file.pk]).delete()
+        transaction.on_commit(lambda: remove_paths(paths))
+
 
 class FileListView(APIView):
-    permission_classes = [IsAuthenticated, IsTerritorialAdminAndAssignedCountry|IsChefDeptTech]
-    
+    permission_classes = FILE_PERMISSIONS
+
     def get(self, request):
-        files = File.objects.filter(country=request.user.country).order_by("-uploaded_at")        
-        serializer = FileSerializer(files, many=True)
+        files = files_for(request.user).select_related('user', 'country').order_by("-uploaded_at")
+        serializer = FileSerializer(files, many=True, context={'request': request})
         return Response(serializer.data)
-    
+
 
 class FileDeleteView(APIView):
-    permission_classes = [IsAuthenticated, IsTerritorialAdminAndAssignedCountry|IsChefDeptTech]
-    parser_classes = [JSONParser]
+    """Supprime la session d'import à laquelle appartient le fichier (les deux fichiers partent ensemble)."""
+    permission_classes = FILE_PERMISSIONS
 
     def delete(self, request, pk):
-        file = get_object_or_404(File, pk=pk)
-        if request.user != file.user and not getattr(request.user, 'is_admin_territorial', False):
-            return Response({"detail": "Vous n'avez pas la permission d'effectuer cette action."},status=status.HTTP_403_FORBIDDEN)
-        delete_claims = request.data.get('delete_claims', False)
+        file = get_object_or_404(files_for(request.user), pk=pk)
+        session = session_of_file(file)
+        target = session or file
+        if not can_delete(request.user, target):
+            return Response({"error": DELETE_FORBIDDEN_MESSAGE}, status=status.HTTP_403_FORBIDDEN)
 
-        if delete_claims:
-            deleted_count, _ = Claim.objects.filter(file=file).delete()
-            msg = f"{deleted_count} sinistres supprimés liés au fichier."
-        else:
-            Claim.objects.filter(file=file).update(file=None)
-            msg = "Référence au fichier retirée des sinistres."
+        if session:
+            _delete_session(session)
+            return Response({"detail": "Import supprimé (fichier statistique et fichier récap)."},
+                            status=status.HTTP_200_OK)
 
-        file.delete()
-        # 200 (et non 204) pour pouvoir renvoyer le message : un 204 avec corps est une réponse HTTP invalide
-        return Response({"detail": f"Fichier supprimé avec succès. {msg}"}, status=status.HTTP_200_OK)
+        paths = file_paths(file.file)
+        with transaction.atomic():
+            file.delete()
+            transaction.on_commit(lambda: remove_paths(paths))
+        return Response({"detail": "Fichier supprimé."}, status=status.HTTP_200_OK)
 
 
 class FileDownloadView(APIView):
-    permission_classes = [IsAuthenticated, IsTerritorialAdminAndAssignedCountry|IsChefDeptTech]
-    
+    permission_classes = FILE_PERMISSIONS
+
     def get(self, request, pk):
-        file = get_object_or_404(File, pk=pk)
-        if request.user != file.user and not getattr(request.user, 'is_admin_territorial', False):
-            return Response({"detail": "Vous n'avez pas la permission d'effectuer cette action."},status=status.HTTP_403_FORBIDDEN)
-        file_path = file.file.path
-        return FileResponse(open(file_path, 'rb'), as_attachment=True)
-    
+        file = get_object_or_404(files_for(request.user), pk=pk)
+        return FileResponse(_open_stored(file.file), as_attachment=True,
+                            filename=os.path.basename(file.file.name))
+
 
 class FilePreviewView(APIView):
-    permission_classes = [IsAuthenticated, IsTerritorialAdminAndAssignedCountry|IsChefDeptTech]
-    
-    def get(self, request, pk):
-        file = get_object_or_404(File, pk=pk)
-        if request.user != file.user and not getattr(request.user, 'is_admin_territorial', False):
-            return Response({"detail": "Vous n'avez pas la permission d'effectuer cette action."},status=status.HTTP_403_FORBIDDEN)
-        df = open_excel_csv(file.file)
-        
-        first_10_rows = df.head(10).to_dict(orient='records')
+    permission_classes = FILE_PERMISSIONS
 
-        total_rows = df.shape[0]
-        total_columns = df.shape[1]
-        
+    def get(self, request, pk):
+        file = get_object_or_404(files_for(request.user), pk=pk)
+        if not os.path.exists(file.file.path):
+            raise Http404("Le fichier n'est plus disponible sur le serveur.")
+        try:
+            df = open_excel_csv(file.file)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # to_json gère les dates et les NaN, que la réponse JSON ne sait pas sérialiser telles quelles
+        first_10_rows = json.loads(df.head(10).to_json(orient='records', date_format='iso', force_ascii=False))
+
         return Response({
             'preview': first_10_rows,
             'metadata': {
-                'total_rows': total_rows,
-                'total_columns': total_columns,
+                'total_rows': df.shape[0],
+                'total_columns': df.shape[1],
                 'preview_row_count': len(first_10_rows)
             }
         }, status=status.HTTP_200_OK)
 
 
 class ImportSessionListView(APIView):
-    permission_classes = [IsAuthenticated, IsTerritorialAdminAndAssignedCountry|IsChefDeptTech]
-    
+    permission_classes = FILE_PERMISSIONS
+
     def get(self, request):
-        import_sessions = ImportSession.objects.filter(country=request.user.country).order_by("-created_at")
+        import_sessions = (
+            sessions_for(request.user)
+            .select_related('user', 'country', 'stat_file', 'recap_file')
+            .order_by("-created_at")
+        )
         serializer = ImportSessionSerializer(import_sessions, many=True, context={'request': request})
         return Response(serializer.data)
-    
+
+
+class ImportSessionDeleteView(APIView):
+    permission_classes = FILE_PERMISSIONS
+
+    def delete(self, request, pk):
+        session = get_object_or_404(sessions_for(request.user).select_related('stat_file', 'recap_file', 'user'), pk=pk)
+        if not can_delete(request.user, session):
+            return Response({"error": DELETE_FORBIDDEN_MESSAGE}, status=status.HTTP_403_FORBIDDEN)
+        _delete_session(session)
+        return Response({"detail": "Import supprimé (fichier statistique et fichier récap)."},
+                        status=status.HTTP_200_OK)
+
 
 class ImportSessionDownloadView(APIView):
-    permission_classes = [IsAuthenticated, IsTerritorialAdminAndAssignedCountry | IsChefDeptTech]
+    permission_classes = FILE_PERMISSIONS
 
-    def get(self, request, session_id):
+    def get(self, request, pk):
+        session = get_object_or_404(sessions_for(request.user), pk=pk)
         file_type = request.query_params.get('type')
-
-        session = get_object_or_404(ImportSession, id=session_id)
-
-        if session.country != request.user.country:
-            return Response({"detail": "Accès interdit à cette session."}, status=status.HTTP_403_FORBIDDEN)
 
         if file_type == 'error':
             if not session.error_file:
-                raise Http404("Aucun fichier d’erreur disponible pour cette session.")
-            return FileResponse(session.error_file.open('rb'), as_attachment=True)
+                raise Http404("Aucun rapport d'erreurs pour cette session.")
+            return FileResponse(_open_stored(session.error_file), as_attachment=True,
+                                filename=os.path.basename(session.error_file.name))
 
-        elif file_type == 'log':
+        if file_type == 'log':
             if not session.log_file_path or not os.path.exists(session.log_file_path):
-                raise Http404("Aucun fichier de log disponible pour cette session.")
-            return FileResponse(open(session.log_file_path, 'rb'), as_attachment=True)
+                raise Http404("Aucun journal pour cette session.")
+            return FileResponse(open(session.log_file_path, 'rb'), as_attachment=True,
+                                filename=os.path.basename(session.log_file_path))
 
-        return Response({"detail": "Paramètre 'type' invalide. Utilisez ?type=error ou ?type=log"},
+        return Response({"error": "Paramètre 'type' invalide. Utilisez ?type=error ou ?type=log"},
                         status=status.HTTP_400_BAD_REQUEST)

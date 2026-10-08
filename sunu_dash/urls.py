@@ -11,7 +11,5 @@ urlpatterns = [
     path("dashboard/", include("dashboard.urls")),
 ]
 
-from django.conf import settings
-from django.conf.urls.static import static
-
-urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# MEDIA_ROOT (fichiers importés, journaux, rapports) n'est volontairement PAS servi par une route /media/ :
+# ces fichiers ne sont accessibles que par les routes /files/ et /import-sessions/, qui contrôlent le pays et le rôle.

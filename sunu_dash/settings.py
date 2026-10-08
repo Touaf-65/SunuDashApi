@@ -148,6 +148,10 @@ STATICFILES_DIRS = [
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+# MEDIA_ROOT n'est servi par aucune route publique : fichiers accessibles uniquement via l'API (file_handling/access.py)
+
+# Taille maximale de chaque fichier importé (stat / récap)
+IMPORT_FILE_MAX_SIZE = 50 * 1024 * 1024
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field

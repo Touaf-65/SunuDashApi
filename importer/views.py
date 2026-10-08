@@ -13,12 +13,14 @@ from .services.cleaning_service import CleaningService
 # from .services.data_mapper import importer_data
 from django.core.files.uploadedfile import UploadedFile
 from file_handling.models import File
+from file_handling.access import CanAccessCountryFiles, validate_uploaded_file, MAX_UPLOAD_SIZE
 
 from .utils.functions import *
 
 class FileUploadAndImportView(APIView):
     parser_classes = [MultiPartParser]
-    permission_classes = [IsAuthenticated, IsTerritorialAdmin, IsTerritorialAdminAndAssignedCountry | IsChefDeptTech]
+    # Admin territorial ou chef de département technique, rattaché à un pays
+    permission_classes = [IsAuthenticated, CanAccessCountryFiles]
 
     expected_stat_headers = [
         "Nom Employeur", "Broker Name", "Nom bénéficiaire", "Acte_Contraté_Assuré",
@@ -36,6 +38,15 @@ class FileUploadAndImportView(APIView):
     ]
 
     def post(self, request, *args, **kwargs):
+        # Refus avant lecture du corps : deux fichiers de 50 Mo maximum (+ marge pour l'enveloppe multipart)
+        try:
+            content_length = int(request.META.get('CONTENT_LENGTH') or 0)
+        except ValueError:
+            content_length = 0
+        if content_length > 2 * MAX_UPLOAD_SIZE + 1024 * 1024:
+            return Response({'detail': f'Fichiers trop volumineux (maximum {MAX_UPLOAD_SIZE // (1024 * 1024)} Mo par fichier).'},
+                            status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+
         stat_file = request.FILES.get('stat_file')
         recap_file = request.FILES.get('recap_file')
         user = request.user
@@ -47,6 +58,16 @@ class FileUploadAndImportView(APIView):
                             status=status.HTTP_400_BAD_REQUEST)
         if not country:
             return Response({'detail': 'Utilisateur sans pays associé.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        file_errors = [
+            err for err in (
+                validate_uploaded_file(stat_file, 'Fichier statistique'),
+                validate_uploaded_file(recap_file, 'Fichier récap'),
+            ) if err
+        ]
+        if file_errors:
+            return Response({'detail': ' '.join(file_errors), 'errors': file_errors},
                             status=status.HTTP_400_BAD_REQUEST)
 
 

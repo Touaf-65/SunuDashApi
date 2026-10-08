@@ -15,6 +15,9 @@ class File(models.Model):
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     uploaded_by_name = models.CharField(max_length=255, blank=True)
     uploaded_by_email = models.EmailField(blank=True, null=True)
+    # Rôle de l'auteur au moment du chargement : détermine qui peut supprimer (file_handling/access.py),
+    # même si le compte de l'auteur change de rôle ou est supprimé ensuite
+    uploaded_by_role = models.CharField(max_length=32, blank=True, default='')
 
 
     file = models.FileField(upload_to='uploads/')
@@ -39,7 +42,9 @@ class File(models.Model):
                 self.uploaded_by_name = full_name or self.user.email
             if not self.uploaded_by_email:
                 self.uploaded_by_email = self.user.email
-        
+            if not self.uploaded_by_role:
+                self.uploaded_by_role = self.user.role
+
         self.size = self.format_size(self.file.size)
         
         super().save(*args, **kwargs)
@@ -73,6 +78,8 @@ class ImportSession(models.Model):
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     uploaded_by_name = models.CharField(max_length=255, blank=True)
     uploaded_by_email = models.EmailField(blank=True, null=True)
+    # Rôle de l'auteur au moment de l'import (voir File.uploaded_by_role)
+    uploaded_by_role = models.CharField(max_length=32, blank=True, default='')
 
     country = models.ForeignKey(Country, on_delete=models.CASCADE)
     stat_file = models.ForeignKey(File, on_delete=models.CASCADE, related_name='stat_sessions')
@@ -98,10 +105,9 @@ class ImportSession(models.Model):
     log_file_path = models.CharField(max_length=500, blank=True, null=True)
     
     def get_log_file_url(self):
-        """Returns the URL of the log file if it exists"""
+        """Route API (avec contrôle d'accès) du journal, s'il existe : /media/ n'est plus servi publiquement."""
         if self.log_file_path and os.path.exists(self.log_file_path):
-            relative_path = os.path.relpath(self.log_file_path, settings.MEDIA_ROOT)
-            return f"{settings.MEDIA_URL}{relative_path}"
+            return f"/import-sessions/{self.pk}/download/?type=log"
         return None
 
     def save(self, *args, **kwargs):
@@ -113,6 +119,8 @@ class ImportSession(models.Model):
                 self.uploaded_by_name = full_name or self.user.email
             if not self.uploaded_by_email:
                 self.uploaded_by_email = self.user.email
+            if not self.uploaded_by_role:
+                self.uploaded_by_role = self.user.role
         super().save(*args, **kwargs)
         
     def __str__(self):

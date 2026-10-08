@@ -19,10 +19,11 @@ Django 5.1 · Django REST Framework · JWT (SimpleJWT) · PostgreSQL 16 · Celer
 5. [Création et gestion des comptes](#création-et-gestion-des-comptes)
 6. [Imports de comptes et de pays (Excel / CSV)](#imports-de-comptes-et-de-pays-excel--csv)
 7. [Gestion des pays](#gestion-des-pays)
-8. [E-mails envoyés](#e-mails-envoyés)
-9. [Référence des routes](#référence-des-routes)
-10. [Codes de réponse à connaître](#codes-de-réponse-à-connaître)
-11. [État des modules](#état-des-modules)
+8. [Fichiers importés (sinistres) : sécurité](#fichiers-importés-sinistres--sécurité)
+9. [E-mails envoyés](#e-mails-envoyés)
+10. [Référence des routes](#référence-des-routes)
+11. [Codes de réponse à connaître](#codes-de-réponse-à-connaître)
+12. [État des modules](#état-des-modules)
 
 ---
 
@@ -197,6 +198,29 @@ Fichier vide, illisible, mal nommé ou sans les bonnes colonnes → **400** avec
 
 ---
 
+## Fichiers importés (sinistres) : sécurité
+
+Règles centralisées dans `file_handling/access.py`. Le traitement de l'import lui-même est encore en refonte.
+
+| Action | Qui |
+|---|---|
+| Importer (fichier statistique + fichier récap) | ADMIN_TERRITORIAL ou CHEF_DEPT_TECH **rattaché à un pays** |
+| Lister, télécharger, prévisualiser, lire le journal / rapport | ADMIN_TERRITORIAL et CHEF_DEPT_TECH **du pays du fichier** |
+| Supprimer un import d'un **admin territorial** | Son auteur seulement ; si l'auteur n'est plus admin territorial du pays (réaffecté, désactivé, changé de rôle, supprimé) → les admins territoriaux actuels du pays |
+| Supprimer un import d'un **chef de département technique** | Son auteur et les admins territoriaux du pays |
+
+- **Isolement par pays** : pour un autre pays, un fichier ou une session répond **404** (comme s'il n'existait pas).
+  Les autres rôles (RESP_OPERATEUR, ADMIN_GLOBAL, SUPERUSER) reçoivent **403**.
+- La **suppression** porte toujours sur **l'import entier** : fichier statistique + fichier récap + journal + rapport,
+  en base et sur disque. Les données déjà importées restent en base, détachées du fichier.
+- Le **rôle de l'auteur** est enregistré au chargement (`uploaded_by_role`) : les droits ne changent pas si son compte change ensuite.
+- **Contrôles à l'import** : `.xlsx`, `.xls`, `.csv` uniquement, **contenu vérifié** (un exécutable renommé est refusé),
+  fichier non vide, **50 Mo maximum** par fichier (`IMPORT_FILE_MAX_SIZE`).
+- Les fichiers **ne sont jamais servis par `/media/`** : uniquement par les routes ci-dessous, avec jeton. Les réponses de
+  l'API n'exposent pas leur chemin sur le serveur ; `can_delete` indique au frontend s'il peut proposer la suppression.
+
+---
+
 ## E-mails envoyés
 
 | Événement | Destinataire | Contenu |
@@ -237,6 +261,15 @@ Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
 | GET | `deactivation-requests/` (`?status=PENDING` par défaut, ou `ALL`…) | ADMIN_GLOBAL, SUPERUSER |
 | POST | `deactivation-requests/<id>/approve/`, `reject/` (`{"comment"}`), `cancel/` | ADMIN_GLOBAL, SUPERUSER |
 
+### Fichiers et imports — `/data/`, `/files/`, `/import-sessions/`
+| Méthode | Route | Accès |
+|---|---|---|
+| POST | `/data/upload/` (multipart `stat_file`, `recap_file`) | ADMIN_TERRITORIAL, CHEF_DEPT_TECH avec pays |
+| GET | `/files/`, `/files/<id>/download/`, `/files/<id>/preview/` | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
+| DELETE | `/files/<id>/delete/` (supprime l'import entier du fichier) | Voir les règles de suppression |
+| GET | `/import-sessions/`, `/import-sessions/<id>/download/?type=log` ou `?type=error` | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
+| DELETE | `/import-sessions/<id>/delete/` | Voir les règles de suppression |
+
 ---
 
 ## Codes de réponse à connaître
@@ -258,6 +291,7 @@ Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
 |---|---|
 | Comptes, authentification, rôles | ✅ Revu et testé (tests de bout en bout par HTTP réel) |
 | Pays (y compris désactivation au quorum et gel) | ✅ Revu et testé |
-| Fichiers et import des sinistres (`file_handling`, `importer`) | 🔧 **En cours de refonte** : sécurité des fichiers, fiabilité des sessions d'import, rapports de non-conformité |
+| Sécurité des fichiers importés (`file_handling`) | ✅ Revue et testée |
+| Import des sinistres (`importer`) | 🔧 **En cours de refonte** : fiabilité des sessions d'import, rapports de non-conformité |
 | Multi-devises | 📐 Conception arrêtée (devises par pays, taux datés saisis par les admins, devise choisie à l'import) — à développer |
 | Tableaux de bord et statistiques (`dashboard`) | ⏳ À revoir |
