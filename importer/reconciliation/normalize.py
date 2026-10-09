@@ -42,6 +42,17 @@ def name_key(value):
     return ' '.join(sorted(words))
 
 
+def ref_key(value):
+    """Clé d'une référence (n° de police, de facture, de paiement) : majuscules, sans espaces ni ponctuation.
+    '4583287/RD / GB', '4583287/RD GB' et '4583287/RD/GB' donnent la même clé."""
+    text = clean_text(value)
+    if text is None:
+        return ''
+    if isinstance(value, float) and value.is_integer():
+        text = str(int(value))
+    return re.sub(r'[^A-Z0-9]', '', strip_accents(text).upper())
+
+
 def header_key(value):
     """Clé d'un en-tête de colonne : minuscules, sans accents ni ponctuation ni espaces.
     'N°cheque/Autre_Moyent_de_payement' -> 'nchequeautremoyentdepayement'."""

@@ -1,6 +1,6 @@
 from django.db.models import Sum, Count, Q, Max
 from django.core.exceptions import ValidationError
-from core.models import Client, Claim, Invoice, InsuredEmployer, Policy, Insured
+from core.models import Client, Claim, InsuredEmployer, Policy, Insured
 from .base import (
     get_granularity, get_trunc_function, parse_date_range,
     generate_periods, fill_full_series, serie_to_pairs,
@@ -49,18 +49,16 @@ class CountryStatisticsService:
             
             self.client_ids = list(self.clients.values_list('id', flat=True))
             
-            self.policies = Policy.objects.select_related('client').filter(
-                client__in=self.client_ids
-            )
+            self.policies = Policy.objects.filter(employers__in=self.client_ids).distinct()
             self.policy_ids = list(self.policies.values_list('id', flat=True))
             
             # Optimized claims queryset with proper joins
             self.claims = Claim.objects.select_related(
-                'invoice', 'policy__client', 'insured'
+                'employer', 'insured'
             ).filter(
                 policy__in=self.policy_ids,
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
             
         except Exception as e:
@@ -123,7 +121,7 @@ class CountryStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Sum('invoice__reimbursed_amount'))
+                .annotate(value=Sum('reimbursed_amount'))
                 .order_by('period')
             )            
             for point in result:
@@ -144,7 +142,7 @@ class CountryStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Sum('invoice__claimed_amount'))
+                .annotate(value=Sum('claimed_amount'))
                 .order_by('period')
             )            
             for point in result:
@@ -166,7 +164,7 @@ class CountryStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Count('invoice__provider', distinct=True))
+                .annotate(value=Count('partner', distinct=True))
                 .order_by('period')
             )
             for point in result:
@@ -294,20 +292,20 @@ class CountryStatisticsService:
             list: Data of top clients with their time series
         """
         top_clients = list(
-            self.claims.values('policy__client_id')
-            .annotate(total_consumption=Sum('invoice__reimbursed_amount'))
+            self.claims.values('employer_id')
+            .annotate(total_consumption=Sum('reimbursed_amount'))
             .order_by('-total_consumption')[:limit]
         )
-        top_client_ids = [c['policy__client_id'] for c in top_clients]
+        top_client_ids = [c['employer_id'] for c in top_clients]
         client_names = {c.id: c.name for c in Client.objects.filter(id__in=top_client_ids)}
 
         top_clients_series = []
         for client_id in top_client_ids:
-            client_claims = self.claims.filter(policy__client_id=client_id)
+            client_claims = self.claims.filter(employer_id=client_id)
             client_series = list(
                 client_claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Sum('invoice__reimbursed_amount'))
+                .annotate(value=Sum('reimbursed_amount'))
                 .order_by('period')
             )
             for point in client_series:

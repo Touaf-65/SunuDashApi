@@ -43,7 +43,7 @@ class CountryFamilyStatisticsService:
             self.claims = Claim.objects.filter(
                 insured_id__in=self.insured_ids,
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
             self.periods = generate_periods(self.date_start, self.date_end, self.granularity)
         except Exception as e:
@@ -118,7 +118,7 @@ class CountryFamilyStatisticsService:
                 # Calculer la consommation totale de la famille
                 family_claims = self.claims.filter(insured_id__in=family_insured_ids)
                 total_consumption = family_claims.aggregate(
-                    total=Sum('invoice__reimbursed_amount')
+                    total=Sum('reimbursed_amount')
                 )['total'] or 0
                 
                 families_consumption[primary_insured.id] = {
@@ -144,7 +144,7 @@ class CountryFamilyStatisticsService:
                 family_series = list(
                     family_claims.annotate(period=self.trunc('settlement_date'))
                     .values('period')
-                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .annotate(value=Sum('reimbursed_amount'))
                     .order_by('period')
                 )
                 for point in family_series:
@@ -254,7 +254,7 @@ class CountryFamilyListService:
             self.claims = Claim.objects.filter(
                 insured_id__in=self.insured_ids,
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
         except Exception as e:
             logger.error(f"Error setting up base filters: {e}")
@@ -291,8 +291,8 @@ class CountryFamilyListService:
                 # Calculer la consommation de la famille sur la période
                 family_claims = self.claims.filter(insured_id__in=family_insured_ids)
                 family_consumption = family_claims.aggregate(
-                    total_claimed=Sum('invoice__claimed_amount'),
-                    total_reimbursed=Sum('invoice__reimbursed_amount'),
+                    total_claimed=Sum('claimed_amount'),
+                    total_reimbursed=Sum('reimbursed_amount'),
                     claims_count=Count('id')
                 )
                 
@@ -307,7 +307,7 @@ class CountryFamilyListService:
                     member_insured = member_ie.insured
                     member_claims = self.claims.filter(insured=member_insured)
                     member_consumption = member_claims.aggregate(
-                        total_reimbursed=Sum('invoice__reimbursed_amount')
+                        total_reimbursed=Sum('reimbursed_amount')
                     )['total_reimbursed'] or 0
                     
                     family_members_details.append({
@@ -408,7 +408,7 @@ class ClientFamilyStatisticsService:
             self.claims = Claim.objects.filter(
                 insured_id__in=self.insured_ids,
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
             self.periods = generate_periods(self.date_start, self.date_end, self.granularity)
         except Exception as e:
@@ -483,7 +483,7 @@ class ClientFamilyStatisticsService:
                 # Calculer la consommation totale de la famille
                 family_claims = self.claims.filter(insured_id__in=family_insured_ids)
                 total_consumption = family_claims.aggregate(
-                    total=Sum('invoice__reimbursed_amount')
+                    total=Sum('reimbursed_amount')
                 )['total'] or 0
 
                 families_consumption[primary_insured.id] = {
@@ -509,7 +509,7 @@ class ClientFamilyStatisticsService:
                 family_series = list(
                     family_claims.annotate(period=self.trunc('settlement_date'))
                     .values('period')
-                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .annotate(value=Sum('reimbursed_amount'))
                     .order_by('period')
                 )
                 for point in family_series:
@@ -617,7 +617,7 @@ class ClientFamilyListService:
             self.claims = Claim.objects.filter(
                 insured_id__in=self.insured_ids,
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
         except Exception as e:
             logger.error(f"Error setting up base filters: {e}")
@@ -653,8 +653,8 @@ class ClientFamilyListService:
                 # Calculer la consommation de la famille sur la période
                 family_claims = self.claims.filter(insured_id__in=family_insured_ids)
                 family_consumption = family_claims.aggregate(
-                    total_claimed=Sum('invoice__claimed_amount'),
-                    total_reimbursed=Sum('invoice__reimbursed_amount'),
+                    total_claimed=Sum('claimed_amount'),
+                    total_reimbursed=Sum('reimbursed_amount'),
                     claims_count=Count('id')
                 )
 
@@ -669,7 +669,7 @@ class ClientFamilyListService:
                     member_insured = member_ie.insured
                     member_claims = self.claims.filter(insured=member_insured)
                     member_consumption = member_claims.aggregate(
-                        total_reimbursed=Sum('invoice__reimbursed_amount')
+                        total_reimbursed=Sum('reimbursed_amount')
                     )['total_reimbursed'] or 0
 
                     family_members_details.append({

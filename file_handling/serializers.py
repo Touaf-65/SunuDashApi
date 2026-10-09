@@ -54,7 +54,8 @@ class ImportSessionSerializer(serializers.ModelSerializer):
         model = ImportSession
         fields = [
             'id', 'user', 'country', 'stat_file', 'recap_file', 'recap_files_count', 'stat_sheet', 'status',
-            'created_at', 'started_at', 'completed_at', 'message', 'start_date', 'end_date', 'summary',
+            'created_at', 'started_at', 'completed_at', 'message', 'start_date', 'end_date', 'summary', 'currency',
+            'claims_created_count', 'insured_created_count', 'total_claimed_amount', 'total_reimbursed_amount',
             'uploaded_by_name', 'uploaded_by_role',
             'error_file_url', 'log_file_url', 'can_delete',
         ]

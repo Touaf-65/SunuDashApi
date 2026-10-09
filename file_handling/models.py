@@ -94,6 +94,8 @@ class ImportSession(models.Model):
     stat_sheet = models.CharField(max_length=255, blank=True, default='')
     # Chiffres du rapprochement (périodes, sinistres par catégorie, importables), voir reconciliation/engine.py
     summary = models.JSONField(null=True, blank=True)
+    # Devise des montants du fichier (un fichier = une devise), par défaut celle du pays (code ISO 4217)
+    currency = models.CharField(max_length=3, blank=True, default='')
 
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)

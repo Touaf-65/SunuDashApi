@@ -224,9 +224,9 @@ Règles centralisées dans `file_handling/access.py`. Le traitement de l'import 
 
 ## Import des sinistres : lecture et rapprochement
 
-Code : `importer/reconciliation/` (sans accès à la base) et `importer/services/analysis_service.py`.
-**État actuel (lots I1-I2) : rien n'est écrit dans les tables métier** ; un import produit un rapport Excel et des
-chiffres sur la session. L'écriture en base viendra au lot I3.
+Code : `importer/reconciliation/` (sans accès à la base), `importer/services/analysis_service.py` (session) et
+`importer/services/writer_service.py` (écriture en base). Deux temps : le **rapprochement** (aucune écriture dans
+les tables métier, rapport Excel), puis, sur action de l'utilisateur, l'**écriture en base** des sinistres importables.
 
 1. **Dépôt** : un fichier statistique et **un ou plusieurs récaps** (pages d'un même export ; jusqu'à
    `IMPORT_MAX_RECAP_FILES` = 300 fichiers et `IMPORT_MAX_TOTAL_SIZE` = 200 Mo par envoi). Les fichiers verrous d'Excel
@@ -239,7 +239,21 @@ chiffres sur la session. L'écriture en base viendra au lot I3.
 6. **Période commune** sur la date de règlement ; aucune → arrêt (statut `ERROR`), message avec les deux plages.
 7. **Rapprochement** par sinistre (somme des lignes d'actes de la statistique contre le total du récap, tolérance < 5) :
    conforme, annulé (contre-passation à total nul), écart de montant, absent du récap, doublon divergent du récap,
-   lignes illisibles. Statut `ANALYSED`, chiffres dans `summary`, rapport dans `error_file` (`?type=error`).
+   lignes illisibles, sinistre incohérent (deux bénéficiaires, polices… pour un même numéro). Statut `ANALYSED`,
+   chiffres dans `summary`, rapport dans `error_file` (`?type=error`).
+8. **Écriture en base** (`POST /import-sessions/<id>/import/`) : les fichiers sont relus et le même rapprochement
+   refait, puis tout est écrit **en une transaction** (une panne n'écrit rien). Statut `DONE`, rapport complété.
+   - Tout est **cloisonné par pays** : employeurs, polices, assurés, partenaires, opérateurs, factures, paiements et
+     numéros de sinistre sont uniques dans un pays (clés normalisées).
+   - Un sinistre = un en-tête + ses **lignes d'actes**, qui portent les montants (devise de la session).
+   - **Familles** : principal au sein d'une police ; assuré retrouvé par `Broker_SunuId`, sinon par son nom sans
+     accents, casse ni ordre des mots ; fautes d'orthographe signalées, jamais fusionnées ; principal sans
+     consommation créé « déduit » ; rôle (principal / conjoint / enfant) porté par l'**adhésion** (`InsuredEmployer`).
+   - **Polices** : plusieurs employeurs, souscripteur (entreprise ou particulier) déduit, plans de garanties,
+     taux de couverture observé (un taux saisi n'est jamais remplacé).
+   - **Actes** : variantes ramenées au libellé retenu par la table `ActAlias` ; « Famille Acte » gardée comme
+     libellé de garantie sur la ligne.
+   - **Réimport** : sinistre déjà en base identique → ignoré ; différent → rejeté et listé (jamais écrasé).
 
 Pour essayer sur des fichiers locaux, sans passer par l'interface :
 
@@ -294,9 +308,10 @@ Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
 ### Fichiers et imports — `/data/`, `/files/`, `/import-sessions/`
 | Méthode | Route | Accès |
 |---|---|---|
-| POST | `/data/upload/` (multipart `stat_file`, `recap_files` × n, `stat_sheet` facultatif) → 200 (`ANALYSED` ou `AWAITING_SHEET` + `sheets`), 422 si l'analyse s'arrête | ADMIN_TERRITORIAL, CHEF_DEPT_TECH avec pays |
+| POST | `/data/upload/` (multipart `stat_file`, `recap_files` × n, `stat_sheet` et `currency` facultatifs) → 200 (`ANALYSED` ou `AWAITING_SHEET` + `sheets`), 422 si l'analyse s'arrête | ADMIN_TERRITORIAL, CHEF_DEPT_TECH avec pays |
 | GET | `/import-sessions/<id>/sheets/` | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
 | POST | `/import-sessions/<id>/analyse/` (`{"stat_sheet"}`) : rapprochement ou nouveau rapprochement | Mêmes droits que la suppression |
+| POST | `/import-sessions/<id>/import/` : écriture en base d'une session `ANALYSED` (409 sinon) | Mêmes droits que la suppression |
 | GET | `/files/`, `/files/<id>/download/`, `/files/<id>/preview/` | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
 | DELETE | `/files/<id>/delete/` (supprime l'import entier du fichier) | Voir les règles de suppression |
 | GET | `/import-sessions/`, `/import-sessions/<id>/download/?type=log` ou `?type=error` | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
@@ -324,6 +339,6 @@ Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
 | Comptes, authentification, rôles | ✅ Revu et testé (tests de bout en bout par HTTP réel) |
 | Pays (y compris désactivation au quorum et gel) | ✅ Revu et testé |
 | Sécurité des fichiers importés (`file_handling`) | ✅ Revue et testée |
-| Import des sinistres (`importer`) | 🔧 **En cours de refonte** : lecture et rapprochement avec rapport ✅ (I1-I2) ; écriture en base et nouveau modèle à venir (I3) |
+| Import des sinistres (`importer`, `core`) | ✅ Lecture, rapprochement, rapport et écriture en base (I1-I3) ; suivi en tâche de fond à venir (I4) |
 | Multi-devises | 📐 Conception arrêtée (devises par pays, taux datés saisis par les admins, devise choisie à l'import) — à développer |
-| Tableaux de bord et statistiques (`dashboard`) | ⏳ À revoir |
+| Tableaux de bord et statistiques (`dashboard`) | 🔧 Adaptés au nouveau modèle des sinistres (toutes les routes vérifiées après un import réel) ; revue complète à venir |

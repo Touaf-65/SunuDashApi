@@ -49,7 +49,7 @@ class CountryInsuredStatisticsService:
             # Tous les assurés du pays (via client)
             self.clients = Client.objects.filter(country_id=self.country_id)
             self.client_ids = list(self.clients.values_list('id', flat=True))
-            self.policies = Policy.objects.filter(client_id__in=self.client_ids)
+            self.policies = Policy.objects.filter(employers__in=self.client_ids).distinct()
             self.policy_ids = list(self.policies.values_list('id', flat=True))
             self.insured_employers = InsuredEmployer.objects.filter(employer_id__in=self.client_ids)
             self.insured_ids = list(self.insured_employers.values_list('insured_id', flat=True))
@@ -57,7 +57,7 @@ class CountryInsuredStatisticsService:
             self.claims = Claim.objects.filter(
                 insured_id__in=self.insured_ids,
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
             self.periods = generate_periods(self.date_start, self.date_end, self.granularity)
         except Exception as e:
@@ -97,7 +97,7 @@ class CountryInsuredStatisticsService:
             consumption_by_role = {}
             for role in roles:
                 claims_role = self.claims.filter(insured__insured_clients__role=role)
-                value = claims_role.aggregate(val=Sum('invoice__reimbursed_amount'))['val'] or 0
+                value = claims_role.aggregate(val=Sum('reimbursed_amount'))['val'] or 0
                 consumption_by_role[role] = value
             return consumption_by_role
         except Exception as e:
@@ -113,7 +113,7 @@ class CountryInsuredStatisticsService:
                 result = list(
                     claims_role.annotate(period=self.trunc('settlement_date'))
                     .values('period')
-                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .annotate(value=Sum('reimbursed_amount'))
                     .order_by('period')
                 )
                 for point in result:
@@ -129,7 +129,7 @@ class CountryInsuredStatisticsService:
             # Top assurés par consommation totale
             top_insureds = list(
                 self.claims.values('insured_id')
-                .annotate(total_consumption=Sum('invoice__reimbursed_amount'))
+                .annotate(total_consumption=Sum('reimbursed_amount'))
                 .order_by('-total_consumption')[:limit]
             )
             top_insured_ids = [c['insured_id'] for c in top_insureds]
@@ -141,7 +141,7 @@ class CountryInsuredStatisticsService:
                 insured_series = list(
                     insured_claims.annotate(period=self.trunc('settlement_date'))
                     .values('period')
-                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .annotate(value=Sum('reimbursed_amount'))
                     .order_by('period')
                 )
                 for point in insured_series:
@@ -359,7 +359,7 @@ class PolicyInsuredStatisticsService:
     def _setup_base_filters(self):
         try:
             # Récupérer la police et vérifier son existence
-            self.policy = Policy.objects.select_related('client', 'client__country').get(id=self.policy_id)
+            self.policy = Policy.objects.select_related('country').prefetch_related('employers').get(id=self.policy_id)
             
             # Récupérer tous les assurés liés à cette police
             self.insured_employers = InsuredEmployer.objects.filter(policy_id=self.policy_id)
@@ -367,10 +367,10 @@ class PolicyInsuredStatisticsService:
             self.insureds = Insured.objects.filter(id__in=self.insured_ids)
             
             # Récupérer les claims pour cette police dans la période
-            self.claims = Claim.objects.select_related('invoice', 'insured').filter(
+            self.claims = Claim.objects.select_related('insured').filter(
                 policy_id=self.policy_id,
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
             
             # Générer les périodes pour les séries temporelles
@@ -413,9 +413,9 @@ class PolicyInsuredStatisticsService:
             list: Série temporelle de l'évolution des assurés
         """
         try:
-            # Utiliser la date de création des liens InsuredEmployer comme proxy pour l'évolution
+            # Arrivée d'un assuré sur la police : première consommation observée sur son adhésion
             result = list(
-                self.insured_employers.annotate(period=self.trunc('creation_date'))
+                self.insured_employers.filter(start_date__isnull=False).annotate(period=self.trunc('start_date'))
                 .values('period')
                 .annotate(value=Count('id'))
                 .order_by('period')
@@ -456,7 +456,7 @@ class PolicyInsuredStatisticsService:
                 result = list(
                     claims_role.annotate(period=self.trunc('settlement_date'))
                     .values('period')
-                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .annotate(value=Sum('reimbursed_amount'))
                     .order_by('period')
                 )
                 
@@ -486,8 +486,8 @@ class PolicyInsuredStatisticsService:
             top_insureds = list(
                 self.claims.values('insured_id')
                 .annotate(
-                    total_consumption=Sum('invoice__reimbursed_amount'),
-                    total_claimed=Sum('invoice__claimed_amount'),
+                    total_consumption=Sum('reimbursed_amount'),
+                    total_claimed=Sum('claimed_amount'),
                     claims_count=Count('id')
                 )
                 .order_by('-total_consumption')[:limit]
@@ -535,11 +535,11 @@ class PolicyInsuredStatisticsService:
                 
                 # Calculer les métriques
                 total_consumption = insured_claims.aggregate(
-                    total=Sum('invoice__reimbursed_amount')
+                    total=Sum('reimbursed_amount')
                 )['total'] or 0
                 
                 total_claimed = insured_claims.aggregate(
-                    total=Sum('invoice__claimed_amount')
+                    total=Sum('claimed_amount')
                 )['total'] or 0
                 
                 claims_count = insured_claims.count()
@@ -592,7 +592,9 @@ class PolicyInsuredStatisticsService:
             # Calculer le ratio S/P global
             sp_ratio = 0
             if total_consumption > 0:
-                sp_ratio = round((self.policy.client.prime / total_consumption) * 100, 2)
+                # Prime encore portée par l'employeur (décision L : à passer sur la police) ; absente -> 0
+                prime = self.policy.client.prime if self.policy.client else None
+                sp_ratio = round((float(prime) / total_consumption) * 100, 2) if prime is not None else 0
             
             # Formater les séries temporelles pour les graphiques
             role_labels = {
@@ -611,7 +613,7 @@ class PolicyInsuredStatisticsService:
                     'id': self.policy.id,
                     'policy_number': self.policy.policy_number,
                     'client_name': self.policy.client.name,
-                    'country_name': self.policy.client.country.name
+                    'country_name': self.policy.country.name
                 },
                 'granularity': self.granularity,
                 'date_start': self.date_start.isoformat(),
@@ -669,7 +671,9 @@ class PolicyInsuredStatisticsService:
             # Calculer le ratio S/P global
             sp_ratio = 0
             if total_consumption > 0:
-                sp_ratio = round((self.policy.client.prime / total_consumption) * 100, 2)
+                # Prime encore portée par l'employeur (décision L : à passer sur la police) ; absente -> 0
+                prime = self.policy.client.prime if self.policy.client else None
+                sp_ratio = round((float(prime) / total_consumption) * 100, 2) if prime is not None else 0
             
             # Formater les séries temporelles pour les graphiques
             role_labels = {
@@ -688,7 +692,7 @@ class PolicyInsuredStatisticsService:
                     'id': self.policy.id,
                     'policy_number': self.policy.policy_number,
                     'client_name': self.policy.client.name,
-                    'country_name': self.policy.client.country.name
+                    'country_name': self.policy.country.name
                 },
                 'granularity': self.granularity,
                 'date_start': self.date_start.isoformat(),
@@ -737,7 +741,7 @@ class PolicyInsuredListService:
     def _setup_base_filters(self):
         try:
             # Récupérer la police et vérifier son existence
-            self.policy = Policy.objects.select_related('client', 'client__country').get(id=self.policy_id)
+            self.policy = Policy.objects.select_related('country').prefetch_related('employers').get(id=self.policy_id)
             
             # Récupérer tous les assurés liés à cette police
             self.insured_employers = InsuredEmployer.objects.filter(policy_id=self.policy_id)
@@ -745,10 +749,10 @@ class PolicyInsuredListService:
             self.insureds = Insured.objects.filter(id__in=self.insured_ids)
             
             # Récupérer les claims pour cette police dans la période
-            self.claims = Claim.objects.select_related('invoice', 'insured').filter(
+            self.claims = Claim.objects.select_related('insured').filter(
                 policy_id=self.policy_id,
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
             
         except Policy.DoesNotExist:
@@ -776,8 +780,8 @@ class PolicyInsuredListService:
                 
                 # Calculer les métriques de consommation
                 consumption_data = insured_claims.aggregate(
-                    total_consumption=Sum('invoice__reimbursed_amount'),
-                    total_claimed=Sum('invoice__claimed_amount'),
+                    total_consumption=Sum('reimbursed_amount'),
+                    total_claimed=Sum('claimed_amount'),
                     claims_count=Count('id')
                 )
                 
@@ -799,7 +803,7 @@ class PolicyInsuredListService:
                 
                 # Déterminer le statut de l'assuré
                 insured_status = "Actif"
-                if insured_employer.end_date and insured_employer.end_date < self.date_end:
+                if insured_employer.end_date and insured_employer.end_date < self.date_end.date():
                     insured_status = "Inactif"
                 
                 insured_data = {
@@ -822,7 +826,7 @@ class PolicyInsuredListService:
                     # Informations sur la police
                     'policy_number': self.policy.policy_number,
                     'client_name': self.policy.client.name,
-                    'country_name': self.policy.client.country.name
+                    'country_name': self.policy.country.name
                 }
                 
                 insureds_list.append(insured_data)
@@ -879,7 +883,7 @@ class PolicyInsuredListService:
                     'id': self.policy.id,
                     'policy_number': self.policy.policy_number,
                     'client_name': self.policy.client.name,
-                    'country_name': self.policy.client.country.name
+                    'country_name': self.policy.country.name
                 },
                 'date_start': self.date_start.isoformat(),
                 'date_end': self.date_end.isoformat()

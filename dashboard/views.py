@@ -1966,10 +1966,11 @@ class CountryPolicyListView(APIView):
         - 500 Internal Server Error: System error during processing
     """
     permission_classes = [IsAuthenticated, IsTerritorialAdmin]
-    
-    def get(self, request):
+
+    def get(self, request, country_id=None):
         """
         Get available filter options for territorial administrators.
+        (`country_id` vient de l'URL ; le pays retenu est toujours celui de l'admin connecté.)
         
         Returns:
             dict: Available clients for filtering (from admin's country)

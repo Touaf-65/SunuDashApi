@@ -93,7 +93,12 @@ class FileUploadAndImportView(APIView):
                              'errors': file_errors},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        session = analysis_service.create_session(user, country, stat_file, recap_uploads)
+        currency = (request.data.get('currency') or '').strip().upper() or None
+        if currency and not (len(currency) == 3 and currency.isalpha()):
+            return Response({'detail': 'Devise invalide : code ISO à 3 lettres attendu (ex. XOF).'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        session = analysis_service.create_session(user, country, stat_file, recap_uploads, currency)
         sheets, error = _sheet_or_error(session, sheet)
         if error:
             analysis_service._fail(session, error)
@@ -153,6 +158,25 @@ class ImportSessionAnalyseView(APIView):
 
         analysis_service.analyse(session, sheet or (sheets[0] if sheets else None))
         return _analyse_response(session, request)
+
+
+class ImportSessionImportView(APIView):
+    """Écriture en base des sinistres importables d'une session rapprochée (lot I3).
+    Le rapprochement est refait sur les mêmes fichiers et la même feuille ; tout est écrit en une transaction.
+    Mêmes droits que la suppression de la session."""
+    permission_classes = [IsAuthenticated, CanAccessCountryFiles]
+
+    def post(self, request, pk):
+        session = get_object_or_404(sessions_for(request.user).select_related('stat_file', 'user', 'country'), pk=pk)
+        if not can_delete(request.user, session):
+            return Response({'detail': "Seul l'auteur de cet import (ou l'admin territorial) peut l'écrire en base."},
+                            status=status.HTTP_403_FORBIDDEN)
+        if session.status != ImportSession.Status.ANALYSED:
+            return Response({'detail': "Seule une session rapprochée (et pas encore importée) peut être écrite en base."},
+                            status=status.HTTP_409_CONFLICT)
+        written = analysis_service.import_claims(session)
+        payload = _session_payload(session, request, detail=session.message)
+        return Response(payload, status=status.HTTP_200_OK if written else status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 import os

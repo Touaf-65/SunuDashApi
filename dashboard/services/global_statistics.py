@@ -1,6 +1,6 @@
 from django.db.models import Sum, Count
 from django.core.exceptions import ValidationError
-from core.models import Client, Claim, InsuredEmployer, Policy, Invoice
+from core.models import Client, Claim, InsuredEmployer, Policy
 from countries.models import Country
 from .base import (
     get_granularity, get_trunc_function, parse_date_range,
@@ -41,17 +41,15 @@ class GlobalStatisticsService:
             self.clients = Client.objects.all()
             self.client_ids = list(self.clients.values_list('id', flat=True))
 
-            self.policies = Policy.objects.select_related('client').filter(
-                client__in=self.client_ids
-            )
+            self.policies = Policy.objects.filter(employers__in=self.client_ids).distinct()
             self.policy_ids = list(self.policies.values_list('id', flat=True))
 
             self.claims = Claim.objects.select_related(
-                'invoice', 'policy__client', 'insured'
+                'employer', 'insured'
             ).filter(
                 policy__in=self.policy_ids,
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
         except Exception as e:
             logger.error(f"Error setting up base filters: {e}")
@@ -113,7 +111,7 @@ class GlobalStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Sum('invoice__reimbursed_amount'))
+                .annotate(value=Sum('reimbursed_amount'))
                 .order_by('period')
             )            
             for point in result:
@@ -134,7 +132,7 @@ class GlobalStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Sum('invoice__claimed_amount'))
+                .annotate(value=Sum('claimed_amount'))
                 .order_by('period')
             )            
             for point in result:
@@ -156,7 +154,7 @@ class GlobalStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Count('invoice__provider', distinct=True))
+                .annotate(value=Count('partner', distinct=True))
                 .order_by('period')
             )
             for point in result:
@@ -284,20 +282,20 @@ class GlobalStatisticsService:
             list: Data of top clients with their time series
         """
         top_clients = list(
-            self.claims.values('policy__client_id')
-            .annotate(total_consumption=Sum('invoice__reimbursed_amount'))
+            self.claims.values('employer_id')
+            .annotate(total_consumption=Sum('reimbursed_amount'))
             .order_by('-total_consumption')[:limit]
         )
-        top_client_ids = [c['policy__client_id'] for c in top_clients]
+        top_client_ids = [c['employer_id'] for c in top_clients]
         client_names = {c.id: c.name for c in Client.objects.filter(id__in=top_client_ids)}
 
         top_clients_series = []
         for client_id in top_client_ids:
-            client_claims = self.claims.filter(policy__client_id=client_id)
+            client_claims = self.claims.filter(employer_id=client_id)
             client_series = list(
                 client_claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Sum('invoice__reimbursed_amount'))
+                .annotate(value=Sum('reimbursed_amount'))
                 .order_by('period')
             )
             for point in client_series:
@@ -324,16 +322,16 @@ class GlobalStatisticsService:
         countries_series = []
         for country_id in country_ids:
             client_ids = list(Client.objects.filter(country_id=country_id).values_list('id', flat=True))
-            policy_ids = list(Policy.objects.filter(client_id__in=client_ids).values_list('id', flat=True))
+            policy_ids = list(Policy.objects.filter(employers__in=client_ids).distinct().values_list('id', flat=True))
             country_claims = Claim.objects.filter(
                 policy_id__in=policy_ids,
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
             country_series = list(
                 country_claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Sum('invoice__reimbursed_amount'))
+                .annotate(value=Sum('reimbursed_amount'))
                 .order_by('period')
             )
             for point in country_series:
@@ -493,7 +491,7 @@ class CountriesListStatisticsService:
     Methods:
         get_countries_statistics():
             Computes and returns a list of dictionaries, each containing the above statistics for every country.
-            Aggregates data from related Client, InsuredEmployer, Claim, and Invoice models.
+            Aggregates data from related Client, InsuredEmployer and Claim models.
             Filters data within the date range provided at initialization.
     """
 
@@ -534,11 +532,10 @@ class CountriesListStatisticsService:
             nb_assures = insured_qs.values('insured_id').distinct().count()
 
             # Consommation globale : somme des montants remboursés des claims dont la policy appartient à un client du pays
-            claims_qs = Claim.objects.filter(policy__client_id__in=client_ids)
+            claims_qs = Claim.objects.filter(employer_id__in=client_ids)
             if self.date_start and self.date_end:
                 claims_qs = claims_qs.filter(settlement_date__range=(self.date_start, self.date_end))
-            claim_invoice_ids = claims_qs.values_list('invoice_id', flat=True)
-            consommation_globale = Invoice.objects.filter(id__in=claim_invoice_ids).aggregate(total=Sum('reimbursed_amount'))['total'] or 0
+            consommation_globale = claims_qs.aggregate(total=Sum('reimbursed_amount'))['total'] or 0
 
             # Ratio S/P
             ratio_sp = float(prime_globale) / float(consommation_globale) if consommation_globale else None

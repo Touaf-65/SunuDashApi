@@ -1,6 +1,6 @@
 from django.db.models import Sum, Count, Q, Max
 from django.core.exceptions import ValidationError
-from core.models import Client, Claim, Invoice, InsuredEmployer, Policy, Insured, Partner, Act, ActCategory
+from core.models import Client, Claim, InsuredEmployer, Policy, Insured, Partner, Act, ActCategory
 from .base import (
     get_granularity, get_trunc_function, parse_date_range,
     generate_periods, fill_full_series, serie_to_pairs,
@@ -86,9 +86,7 @@ class ClientStatisticsService:
                 raise ValidationError(f"Client with ID {self.client_id} does not exist")
             
             # Optimized policies queryset
-            self.policies = Policy.objects.select_related('client').filter(
-                client_id=self.client_id
-            )
+            self.policies = Policy.objects.filter(employers=self.client_id)
             self.policy_ids = list(self.policies.values_list('id', flat=True))
             
             # Get insured IDs for this client via InsuredEmployer relationship
@@ -100,11 +98,11 @@ class ClientStatisticsService:
             # Optimized claims queryset with proper joins
             # Claims can be linked via insured OR policy, so we use both approaches
             self.claims = Claim.objects.select_related(
-                'invoice', 'policy__client', 'insured', 'partner'
+                'employer', 'insured', 'partner'
             ).filter(
-                Q(insured_id__in=insured_ids) | Q(policy__client_id=self.client_id),
+                Q(insured_id__in=insured_ids) | Q(employer_id=self.client_id),
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
             
             # Standard logging for monitoring
@@ -204,7 +202,7 @@ class ClientStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Sum('invoice__reimbursed_amount'))
+                .annotate(value=Sum('reimbursed_amount'))
                 .order_by('period')
             )
             
@@ -228,7 +226,7 @@ class ClientStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Sum('invoice__claimed_amount'))
+                .annotate(value=Sum('claimed_amount'))
                 .order_by('period')
             )
             
@@ -252,7 +250,7 @@ class ClientStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Count('invoice__provider', distinct=True))
+                .annotate(value=Count('partner', distinct=True))
                 .order_by('period')
             )
             
@@ -402,7 +400,7 @@ class ClientStatisticsService:
             claims_by_role = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period', 'insured__insured_clients__role')
-                .annotate(value=Sum('invoice__reimbursed_amount'))
+                .annotate(value=Sum('reimbursed_amount'))
                 .order_by('period', 'insured__insured_clients__role')
             )
             
@@ -435,22 +433,22 @@ class ClientStatisticsService:
         try:
             # Identification of top partners
             top_partners = list(
-                self.claims.values('invoice__provider_id')
-                .annotate(total_consumption=Sum('invoice__reimbursed_amount'))
+                self.claims.values('partner_id')
+                .annotate(total_consumption=Sum('reimbursed_amount'))
                 .order_by('-total_consumption')[:limit]
             )
             
-            top_partner_ids = [p['invoice__provider_id'] for p in top_partners]
+            top_partner_ids = [p['partner_id'] for p in top_partners]
             partner_names = {p.id: p.name for p in Partner.objects.filter(id__in=top_partner_ids)}
 
             # Generation of time series for each top partner
             top_partners_series = []
             for partner_id in top_partner_ids:
-                partner_claims = self.claims.filter(invoice__provider_id=partner_id)
+                partner_claims = self.claims.filter(partner_id=partner_id)
                 partner_series = list(
                     partner_claims.annotate(period=self.trunc('settlement_date'))
                     .values('period')
-                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .annotate(value=Sum('reimbursed_amount'))
                     .order_by('period')
                 )
                 
@@ -484,8 +482,8 @@ class ClientStatisticsService:
             top_partners_qs = list(
                 self.claims.values('partner_id')
                 .annotate(
-                    reimbursed=Sum('invoice__reimbursed_amount'),
-                    claimed=Sum('invoice__claimed_amount')
+                    reimbursed=Sum('reimbursed_amount'),
+                    claimed=Sum('claimed_amount')
                 )
                 .order_by('-reimbursed')[:limit]
             )
@@ -519,21 +517,22 @@ class ClientStatisticsService:
             list: Data of top acts with their time series
         """
         try:
+            # Les actes sont sur les lignes du sinistre : somme des lignes de l'acte, pas du sinistre entier
             top_acts = list(
-                self.claims.values('act_id')
-                .annotate(total_consumption=Sum('invoice__reimbursed_amount'))
+                self.claims.filter(lines__act__isnull=False).values('lines__act_id')
+                .annotate(total_consumption=Sum('lines__reimbursed_amount'))
                 .order_by('-total_consumption')[:limit]
             )
-            top_act_ids = [a['act_id'] for a in top_acts]
+            top_act_ids = [a['lines__act_id'] for a in top_acts]
             act_names = {a.id: a.label for a in Act.objects.filter(id__in=top_act_ids)}
 
             top_acts_series = []
             for act_id in top_act_ids:
-                act_claims = self.claims.filter(act_id=act_id)
+                act_claims = self.claims.filter(lines__act_id=act_id)
                 act_series = list(
                     act_claims.annotate(period=self.trunc('settlement_date'))
                     .values('period')
-                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .annotate(value=Sum('lines__reimbursed_amount'))
                     .order_by('period')
                 )
                 for point in act_series:
@@ -559,26 +558,23 @@ class ClientStatisticsService:
             list: Data of top categories with their time series
         """
         try:
+            # Catégorie portée par chaque ligne d'acte
             top_categories = list(
-                self.claims.filter(
-                    act__isnull=False,
-                    act__family__category__isnull=False
-                )
-                .values('act__family__category')
-                .annotate(total_consumption=Sum('invoice__reimbursed_amount'))
+                self.claims.values('lines__category')
+                .annotate(total_consumption=Sum('lines__reimbursed_amount'))
                 .order_by('-total_consumption')[:limit]
             )
-            
-            top_category_ids = [c['act__family__category'] for c in top_categories]
+
+            top_category_ids = [c['lines__category'] for c in top_categories if c['lines__category']]
             category_names = {c.id: c.label for c in ActCategory.objects.filter(id__in=top_category_ids)}
 
             top_categories_series = []
             for category_id in top_category_ids:
-                category_claims = self.claims.filter(act__family__category=category_id)
+                category_claims = self.claims.filter(lines__category=category_id)
                 category_series = list(
                     category_claims.annotate(period=self.trunc('settlement_date'))
                     .values('period')
-                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .annotate(value=Sum('lines__reimbursed_amount'))
                     .order_by('period')
                 )
                 for point in category_series:
@@ -844,7 +840,7 @@ class ClientStatisticListService:
         """
         try:
             # Get policies count
-            nb_policies = Policy.objects.filter(client=client).count()
+            nb_policies = Policy.objects.filter(employers=client).count()
             
             # Get insured employees for this client
             insured_links = InsuredEmployer.objects.select_related('insured').filter(
@@ -858,16 +854,16 @@ class ClientStatisticListService:
             
             # Get claims for this client in the date range
             # Use both insured and policy relationships like in ClientStatisticsService
-            claims = Claim.objects.select_related('invoice').filter(
-                Q(insured_id__in=insured_ids) | Q(policy__client_id=client.id),
+            claims = Claim.objects.filter(
+                Q(insured_id__in=insured_ids) | Q(employer_id=client.id),
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
             
             # Calculate consumption and reimbursement totals
             consumption_data = claims.aggregate(
-                total_consumption=Sum('invoice__claimed_amount'),
-                total_reimbursement=Sum('invoice__reimbursed_amount')
+                total_consumption=Sum('claimed_amount'),
+                total_reimbursement=Sum('reimbursed_amount')
             )
             
             total_consumption = float(consumption_data['total_consumption'] or 0)
@@ -969,7 +965,7 @@ class GlobalClientsListService:
         """
         try:
             # Get policies count
-            nb_policies = Policy.objects.filter(client=client).count()
+            nb_policies = Policy.objects.filter(employers=client).count()
             
             # Get insured employees for this client
             insured_links = InsuredEmployer.objects.select_related('insured').filter(
@@ -983,16 +979,16 @@ class GlobalClientsListService:
             
             # Get claims for this client in the date range
             # Use both insured and policy relationships like in ClientStatisticsService
-            claims = Claim.objects.select_related('invoice').filter(
-                Q(insured_id__in=insured_ids) | Q(policy__client_id=client.id),
+            claims = Claim.objects.filter(
+                Q(insured_id__in=insured_ids) | Q(employer_id=client.id),
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
             
             # Calculate consumption and reimbursement totals
             consumption_data = claims.aggregate(
-                total_consumption=Sum('invoice__claimed_amount'),
-                total_reimbursement=Sum('invoice__reimbursed_amount')
+                total_consumption=Sum('claimed_amount'),
+                total_reimbursement=Sum('reimbursed_amount')
             )
             
             total_consumption = float(consumption_data['total_consumption'] or 0)
@@ -1055,25 +1051,19 @@ class GlobalClientStatisticsService:
             self.client_ids = list(self.clients.values_list('id', flat=True))
 
             # Related querysets for premium calculation
-            self.policies = Policy.objects.select_related('client').filter(
-                client__in=self.client_ids
-            )
+            self.policies = Policy.objects.filter(employers__in=self.client_ids).distinct()
             self.policy_ids = list(self.policies.values_list('id', flat=True))
 
             # Claims data for S/P ratio calculation
             self.claims = Claim.objects.select_related(
-                'invoice', 'policy__client', 'insured'
+                'employer', 'insured'
             ).filter(
                 policy__in=self.policy_ids,
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
 
-            # Invoices data for claimed amount calculation
-            self.invoices = Invoice.objects.select_related(
-                'provider', 'insured'
-            ).filter(
-                insured__insured_clients__employer__in=self.client_ids
-            )
+            # Montants facturés : portés par les sinistres (somme de leurs lignes d'actes)
+            self.invoices = Claim.objects.filter(employer__in=self.client_ids)
 
         except Exception as e:
             logger.error(f"Error setting up base querysets: {e}")
@@ -1203,25 +1193,22 @@ class CountryClientStatisticsService:
             self.client_ids = list(self.clients.values_list('id', flat=True))
 
             # Related querysets for premium calculation
-            self.policies = Policy.objects.select_related('client').filter(
-                client__in=self.client_ids
-            )
+            self.policies = Policy.objects.filter(employers__in=self.client_ids).distinct()
             self.policy_ids = list(self.policies.values_list('id', flat=True))
 
             # Claims data for S/P ratio calculation
             self.claims = Claim.objects.select_related(
-                'invoice', 'policy__client', 'insured'
+                'employer', 'insured'
             ).filter(
                 policy__in=self.policy_ids,
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
 
-            # Invoices data for claimed amount calculation
-            self.invoices = Invoice.objects.select_related(
-                'provider', 'insured'
-            ).filter(
-                insured__insured_clients__employer__in=self.client_ids
-            )
+            # Montants facturés : portés par les sinistres (somme de leurs lignes d'actes)
+            self.invoices = Claim.objects.filter(employer__in=self.client_ids)
+
+            # Adhésions des assurés aux employeurs du pays (utilisé par get_total_insured_count)
+            self.insured_employers = InsuredEmployer.objects.filter(employer__in=self.client_ids)
 
         except Exception as e:
             logger.error(f"Error setting up base querysets: {e}")

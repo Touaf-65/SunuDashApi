@@ -155,8 +155,9 @@ def _date_cols(res):
             'Date de règlement (statistique)', 'Date de règlement (récap)'} - {None}
 
 
-def build_report(res, meta=None):
-    """Classeur Excel (bytes). `meta` : pays, auteur, session, date, dry_run…"""
+def build_report(res, meta=None, write=None):
+    """Classeur Excel (bytes). `meta` : pays, auteur, session, date, dry_run… ; `write` : résultat de
+    l'écriture en base (writer_service.WriteResult), qui ajoute sa synthèse et ses feuilles."""
     meta = meta or {}
     s = res.summary
     claims = res.claims
@@ -172,8 +173,29 @@ def build_report(res, meta=None):
         ('Analyse lancée par', meta.get('user')),
         ('Date de l\'analyse', meta.get('date') or dt.datetime.now().strftime('%d/%m/%Y %H:%M')),
     ]
-    if meta.get('dry_run', True):
-        rows.append(('Écriture en base', "Aucune : analyse seule (l'écriture en base viendra au lot I3)."))
+    if meta.get('currency'):
+        rows.append(('Devise des montants', meta['currency']))
+    if write is None and meta.get('dry_run', True):
+        rows.append(('Écriture en base', "Aucune : rapprochement seul, en attente de validation."))
+    if write is not None:
+        c = write.created
+        rows += [
+            (SECTION, 'Écriture en base'),
+            ('Sinistres importés', c['Claim']),
+            ("Lignes d'actes importées", c['ClaimLine']),
+            ('Montant facturé importé', float(write.claimed)),
+            ('Montant remboursé importé', float(write.reimbursed)),
+            ('Déjà en base à l\'identique (ignorés)', len(write.skipped_identical)),
+            ("Rejetés à l'écriture (voir « Rejets à l'écriture »)", len(write.rejected)),
+            ('Assurés créés (dont principaux déduits)', f"{c['Insured']} (dont {c['principaux déduits']})"),
+            ('Adhésions créées', c['InsuredEmployer']),
+            ('Employeurs / polices / plans créés', f"{c['Client']} / {c['Policy']} / {c['GuaranteePlan']}"),
+            ('Souscripteurs créés', c['Subscriber']),
+            ('Partenaires / opérateurs créés', f"{c['Partner']} / {c['Operator']}"),
+            ('Catégories / actes créés', f"{c['ActCategory']} / {c['Act']}"),
+            ('Factures / paiements créés', f"{c['Invoice']} / {c['Payment']}"),
+            ('Points à vérifier sur les assurés', len(write.insured_notes)),
+        ]
     rows += [
         (SECTION, 'Fichiers'),
         ('Fichier statistique', stat_label),
@@ -219,6 +241,13 @@ def build_report(res, meta=None):
         ('Conformes', 'sinistres importables'),
         ('Anomalies de lecture', 'lignes illisibles des deux côtés'),
     ]
+    if write is not None:
+        rows += [
+            ("Rejets à l'écriture", 'sinistres importables non écrits (déjà en base avec d\'autres valeurs, donnée absente)'),
+            ('Assurés à vérifier', "variantes de noms, principaux déduits proches d'un autre, rôles incohérents"),
+            ('Polices et taux', 'souscripteur déduit ou à renseigner, taux de couverture observés'),
+            ('Déjà en base (identiques)', 'sinistres ignorés car déjà importés à l\'identique'),
+        ]
     w.summary('Synthèse', rows)
 
     widths = {'Observation': 70, 'N° sinistre': 32, 'Bénéficiaire': 30, 'Assuré principal': 30,
@@ -252,4 +281,15 @@ def build_report(res, meta=None):
     lead = ['Côté', 'Motif'] + ORIGIN_COLUMNS
     anomalies = anomalies[lead + [c for c in anomalies.columns if c not in lead]]
     w.table('Anomalies de lecture', anomalies, {'Motif': 45}, date_columns=dates)
+
+    if write is not None:
+        w.table("Rejets à l'écriture", pd.DataFrame(write.rejected, columns=['N° sinistre', 'Motif', 'Détail']),
+                {'N° sinistre': 32, 'Motif': 40, 'Détail': 110})
+        w.table('Assurés à vérifier', pd.DataFrame(write.insured_notes, columns=['Police', 'Assuré', 'Motif', 'Détail']),
+                {'Police': 24, 'Assuré': 36, 'Motif': 50, 'Détail': 70})
+        w.table('Polices et taux', pd.DataFrame(write.policy_notes, columns=['Police', 'Plan', 'Souscripteur',
+                                                                            'Taux observé', 'Taux enregistré', 'Remarque']),
+                {'Police': 24, 'Plan': 40, 'Souscripteur': 45, 'Remarque': 60})
+        w.table('Déjà en base (identiques)', pd.DataFrame({'N° sinistre': write.skipped_identical}),
+                {'N° sinistre': 32})
     return w.save()

@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+from .normalize import text_key
+
 TOLERANCE = 5
 
 CONFORME = 'Conforme'
@@ -26,9 +28,14 @@ ECART = 'Écart de montant'
 ABSENT_RECAP = 'Absent du récap'
 DOUBLON_RECAP = 'Doublon divergent dans le récap'
 ILLISIBLE = 'Lignes illisibles'
+INCOHERENT = 'Sinistre incohérent'
 
 IMPORTABLE = (CONFORME, ANNULE)
-NON_CONFORME = (ECART, ABSENT_RECAP, DOUBLON_RECAP, ILLISIBLE)
+NON_CONFORME = (ECART, ABSENT_RECAP, DOUBLON_RECAP, ILLISIBLE, INCOHERENT)
+
+# Une seule valeur par sinistre attendue pour ces colonnes (les autres varient d'une ligne d'acte à l'autre)
+HEADER_COLUMNS = {'beneficiary': 'bénéficiaires', 'policy_number': 'polices', 'employer': 'employeurs',
+                  'partner': 'partenaires'}
 
 CANCELLED_STATUS = 'ANNULEE'
 
@@ -65,6 +72,7 @@ class Result:
     period: tuple
     claims: pd.DataFrame                  # un sinistre de la statistique par ligne, avec sa catégorie
     recap_only: pd.DataFrame              # lignes du récap (payées, période commune) absentes de la statistique
+    period_lines_index: pd.Index          # lignes lisibles de la statistique dans la période commune
     out_of_period_index: pd.Index         # lignes de la statistique hors période
     unpaid_index: pd.Index                # lignes du récap non payées
     divergent_index: pd.Index             # lignes du récap en double avec des valeurs différentes
@@ -73,6 +81,11 @@ class Result:
     @property
     def importable_claim_ids(self):
         return list(self.claims.index[self.claims['categorie'].isin(IMPORTABLE)])
+
+    def importable_lines(self):
+        """Lignes de la statistique (noms communs) des sinistres importables, dans l'ordre du fichier."""
+        data = self.stat.data.loc[self.period_lines_index]
+        return data[data['claim_id'].isin(set(self.importable_claim_ids))]
 
 
 def _range(dates):
@@ -162,6 +175,15 @@ def reconcile(stat, recap, tolerance=TOLERANCE):
     claims['ecart_facture'] = claims['facture_stat'] - claims['facture_recap']
     claims['ecart_rembourse'] = claims['rembourse_stat'] - claims['rembourse_recap']
 
+    # Sinistres dont l'en-tête n'est pas unique (deux bénéficiaires, deux polices…) : jamais importés
+    incoherent = {}
+    for col, label in HEADER_COLUMNS.items():
+        if col not in lines:
+            continue
+        counts = lines.assign(_k=lines[col].map(text_key)).groupby('claim_id')['_k'].nunique()
+        for cid in counts.index[counts > 1]:
+            incoherent.setdefault(cid, []).append(label)
+
     unreadable_ids = set(s.loc[s_bad, 'claim_id'].dropna())
     unpaid_ids = set(r.loc[r['unpaid'], 'claim_id'].dropna())
     recap_other_dates = r_single.set_index('claim_id')['settlement_date']
@@ -172,6 +194,8 @@ def reconcile(stat, recap, tolerance=TOLERANCE):
             return ILLISIBLE, "Certaines lignes de ce sinistre sont illisibles (voir la feuille « Anomalies de lecture »)."
         if cid in divergent_ids:
             return DOUBLON_RECAP, "Présent plusieurs fois dans le récap avec des valeurs différentes."
+        if cid in incoherent:
+            return INCOHERENT, f"Plusieurs {', '.join(incoherent[cid])} pour un même sinistre dans la statistique."
         if row['dans_recap']:
             ok = abs(row['ecart_facture']) < tolerance and abs(row['ecart_rembourse']) < tolerance
             return (CONFORME, '') if ok else (ECART, _observation(row, tolerance))
@@ -202,6 +226,7 @@ def reconcile(stat, recap, tolerance=TOLERANCE):
         stat=stat, recap=recap, tolerance=tolerance,
         stat_range=stat_range, recap_range=recap_range, period=(start, end),
         claims=claims, recap_only=recap_only,
+        period_lines_index=lines.index,
         out_of_period_index=out_of_period_index,
         unpaid_index=r.index[r['unpaid'] & ~r_bad],
         divergent_index=r_paid.index[dup_mask],

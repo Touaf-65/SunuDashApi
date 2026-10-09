@@ -1,6 +1,6 @@
 from django.db.models import Sum, Count, Q
 from django.core.exceptions import ValidationError
-from core.models import Partner, Claim, Invoice, InsuredEmployer  
+from core.models import Partner, Claim, InsuredEmployer
 from countries.models import Country
 from .base import (
     get_granularity, get_trunc_function, parse_date_range,
@@ -46,11 +46,11 @@ class GlobalPartnerStatisticsService:
 
             # Claims with partners in the date range
             self.claims = Claim.objects.select_related(
-                'invoice', 'partner', 'partner__country', 'policy__client'
+                'partner', 'partner__country', 'employer'
             ).filter(
                 partner_id__in=self.partner_ids,
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
             
             # Generate periods for time series
@@ -92,7 +92,7 @@ class GlobalPartnerStatisticsService:
                     partner_id__in=self.partner_ids,
                     settlement_date__gte=period,
                     settlement_date__lt=period_end,
-                    invoice__isnull=False
+                    claimed_amount__isnull=False
                 ).values('partner_id').distinct().count()
                 
                 timestamp = int(period.timestamp()) * 1000
@@ -114,7 +114,7 @@ class GlobalPartnerStatisticsService:
             claims_data = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(total=Sum('invoice__claimed_amount'))
+                .annotate(total=Sum('claimed_amount'))
                 .order_by('period')
             )
             
@@ -144,7 +144,7 @@ class GlobalPartnerStatisticsService:
             claims_data = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(total=Sum('invoice__reimbursed_amount'))
+                .annotate(total=Sum('reimbursed_amount'))
                 .order_by('period')
             )
             
@@ -179,8 +179,8 @@ class GlobalPartnerStatisticsService:
                     'partner_id', 'partner__name', 'partner__country__name'
                 )
                 .annotate(
-                    total_claimed=Sum('invoice__claimed_amount'),
-                    total_reimbursed=Sum('invoice__reimbursed_amount'),
+                    total_claimed=Sum('claimed_amount'),
+                    total_reimbursed=Sum('reimbursed_amount'),
                     claims_count=Count('id')
                 )
                 .order_by('-total_reimbursed')[:limit]
@@ -217,7 +217,7 @@ class GlobalPartnerStatisticsService:
             # Get top partners by total consumption
             top_partners = list(
                 self.claims.values('partner_id', 'partner__name')
-                .annotate(total_reimbursed=Sum('invoice__reimbursed_amount'))
+                .annotate(total_reimbursed=Sum('reimbursed_amount'))
                 .order_by('-total_reimbursed')[:limit]
             )
             
@@ -237,7 +237,7 @@ class GlobalPartnerStatisticsService:
                     self.claims.filter(partner_id=partner_id)
                     .annotate(period=self.trunc('settlement_date'))
                     .values('period')
-                    .annotate(total=Sum('invoice__reimbursed_amount'))
+                    .annotate(total=Sum('reimbursed_amount'))
                     .order_by('period')
                 )
                 
@@ -271,8 +271,8 @@ class GlobalPartnerStatisticsService:
         """
         try:
             totals = self.claims.aggregate(
-                total_claimed=Sum('invoice__claimed_amount'),
-                total_reimbursed=Sum('invoice__reimbursed_amount'),
+                total_claimed=Sum('claimed_amount'),
+                total_reimbursed=Sum('reimbursed_amount'),
                 total_claims=Count('id')
             )
             
@@ -422,10 +422,10 @@ class GlobalPartnerListStatisticsService:
             
             # Claims with partners in the date range
             self.claims = Claim.objects.select_related(
-                'invoice', 'partner', 'partner__country'
+                'partner', 'partner__country'
             ).filter(
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False,
+                claimed_amount__isnull=False,
                 partner__isnull=False
             )
             
@@ -451,8 +451,8 @@ class GlobalPartnerListStatisticsService:
                     'partner__country__name'
                 )
                 .annotate(
-                    total_claimed=Sum('invoice__claimed_amount'),
-                    total_reimbursed=Sum('invoice__reimbursed_amount'),
+                    total_claimed=Sum('claimed_amount'),
+                    total_reimbursed=Sum('reimbursed_amount'),
                     claims_count=Count('id')
                 )
                 .order_by('-total_reimbursed')
@@ -502,8 +502,8 @@ class GlobalPartnerListStatisticsService:
         try:
             # Get total statistics
             totals = self.claims.aggregate(
-                total_claimed=Sum('invoice__claimed_amount'),
-                total_reimbursed=Sum('invoice__reimbursed_amount'),
+                total_claimed=Sum('claimed_amount'),
+                total_reimbursed=Sum('reimbursed_amount'),
                 total_claims=Count('id')
             )
             
@@ -1046,19 +1046,16 @@ class PartnerStatisticsService:
                 raise ValidationError(f"Partner with ID {self.partner_id} does not exist")
             # Claims liés à ce partenaire
             self.claims = Claim.objects.select_related(
-                'invoice', 'policy__client', 'insured', 'partner'
+                'employer', 'insured', 'partner'
             ).filter(
                 partner_id=self.partner_id,
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
-            # Invoices liées à ce partenaire
-            self.invoices = Invoice.objects.filter(
-                provider_id=self.partner_id,
-                creation_date__range=(self.date_start, self.date_end)
-            )
+            # Montants de ce partenaire : portés par ses sinistres
+            self.invoices = self.claims
             # Clients ayant eu des consommations chez ce partenaire
-            self.client_ids = self.claims.values_list('policy__client_id', flat=True).distinct()
+            self.client_ids = self.claims.values_list('employer_id', flat=True).distinct()
             self.clients = Client.objects.filter(id__in=self.client_ids)
             # Assurés ayant consommé chez ce partenaire
             self.insured_ids = self.claims.values_list('insured_id', flat=True).distinct()
@@ -1075,7 +1072,7 @@ class PartnerStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Count('policy__client', distinct=True))
+                .annotate(value=Count('employer', distinct=True))
                 .order_by('period')
             )
             for point in result:
@@ -1111,7 +1108,7 @@ class PartnerStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Sum('invoice__reimbursed_amount'))
+                .annotate(value=Sum('reimbursed_amount'))
                 .order_by('period')
             )
             for point in result:
@@ -1129,7 +1126,7 @@ class PartnerStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Sum('invoice__claimed_amount'))
+                .annotate(value=Sum('claimed_amount'))
                 .order_by('period')
             )
             for point in result:
@@ -1152,7 +1149,7 @@ class PartnerStatisticsService:
                 result = list(
                     claims_role.annotate(period=self.trunc('settlement_date'))
                     .values('period')
-                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .annotate(value=Sum('reimbursed_amount'))
                     .order_by('period')
                 )
                 for point in result:
@@ -1171,20 +1168,20 @@ class PartnerStatisticsService:
         try:
             # Top clients par consommation totale
             top_clients = list(
-                self.claims.values('policy__client_id')
-                .annotate(total_consumption=Sum('invoice__reimbursed_amount'))
+                self.claims.values('employer_id')
+                .annotate(total_consumption=Sum('reimbursed_amount'))
                 .order_by('-total_consumption')[:limit]
             )
-            top_client_ids = [c['policy__client_id'] for c in top_clients]
+            top_client_ids = [c['employer_id'] for c in top_clients]
             client_names = {c.id: c.name for c in self.clients.filter(id__in=top_client_ids)}
             # Générer la série temporelle pour chaque client
             top_clients_series = []
             for client_id in top_client_ids:
-                client_claims = self.claims.filter(policy__client_id=client_id)
+                client_claims = self.claims.filter(employer_id=client_id)
                 client_series = list(
                     client_claims.annotate(period=self.trunc('settlement_date'))
                     .values('period')
-                    .annotate(value=Sum('invoice__reimbursed_amount'))
+                    .annotate(value=Sum('reimbursed_amount'))
                     .order_by('period')
                 )
                 for point in client_series:
@@ -1210,7 +1207,7 @@ class PartnerStatisticsService:
             result = list(
                 self.claims.annotate(period=self.trunc('settlement_date'))
                 .values('period')
-                .annotate(value=Count('act_id'))
+                .annotate(value=Count('lines'))
                 .order_by('period')
             )
             for point in result:

@@ -1,6 +1,6 @@
 from django.db.models import Sum, Count, Q
 from django.core.exceptions import ValidationError
-from core.models import Policy, Client, Claim, Invoice, InsuredEmployer
+from core.models import Policy, Client, Claim, InsuredEmployer
 from countries.models import Country
 from .base import parse_date_range, sanitize_float
 import logging
@@ -43,8 +43,8 @@ class CountryPolicyListService:
                 raise ValidationError(f"Country with ID {self.country_id} does not exist")
             
             # Base policies queryset for the country
-            self.policies = Policy.objects.select_related('client', 'client__country').filter(
-                client__country_id=self.country_id
+            self.policies = Policy.objects.select_related('country').prefetch_related('employers').filter(
+                country_id=self.country_id
             )
             
             # Validate that policies exist
@@ -95,7 +95,7 @@ class CountryPolicyListService:
         try:
             # Get insured employees for this policy
             insured_links = InsuredEmployer.objects.select_related('insured').filter(
-                employer=policy.client
+                policy=policy
             )
             nb_insured = insured_links.count()
             
@@ -104,16 +104,16 @@ class CountryPolicyListService:
             
             # Get claims for this policy in the date range
             # Use both insured and policy relationships like in ClientStatisticsService
-            claims = Claim.objects.select_related('invoice').filter(
-                Q(insured_id__in=insured_ids) | Q(policy_id=policy.id),
+            claims = Claim.objects.filter(
+                policy_id=policy.id,  # le sinistre porte sa police
                 settlement_date__range=(self.date_start, self.date_end),
-                invoice__isnull=False
+                claimed_amount__isnull=False
             )
             
             # Calculate consumption and reimbursement totals
             amounts_data = claims.aggregate(
-                total_claimed=Sum('invoice__claimed_amount'),
-                total_reimbursed=Sum('invoice__reimbursed_amount')
+                total_claimed=Sum('claimed_amount'),
+                total_reimbursed=Sum('reimbursed_amount')
             )
             
             total_claimed_amount = float(amounts_data['total_claimed'] or 0)
