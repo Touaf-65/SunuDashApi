@@ -45,6 +45,7 @@ class ImportSessionSerializer(serializers.ModelSerializer):
     stat_file = FileSerializer(read_only=True)
     recap_file = FileSerializer(read_only=True)
 
+    recap_files_count = serializers.SerializerMethodField()
     error_file_url = serializers.SerializerMethodField()
     log_file_url = serializers.SerializerMethodField()
     can_delete = serializers.SerializerMethodField()
@@ -52,12 +53,15 @@ class ImportSessionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ImportSession
         fields = [
-            'id', 'user', 'country', 'stat_file', 'recap_file', 'status',
-            'created_at', 'started_at', 'completed_at', 'message',
+            'id', 'user', 'country', 'stat_file', 'recap_file', 'recap_files_count', 'stat_sheet', 'status',
+            'created_at', 'started_at', 'completed_at', 'message', 'start_date', 'end_date', 'summary',
             'uploaded_by_name', 'uploaded_by_role',
             'error_file_url', 'log_file_url', 'can_delete',
         ]
         read_only_fields = fields
+
+    def get_recap_files_count(self, obj):
+        return obj.recap_files.count() or 1
 
     # Chemins relatifs à l'API (le frontend les préfixe par API_CONFIG.BASE_URL)
     def get_error_file_url(self, obj):

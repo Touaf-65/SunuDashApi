@@ -77,11 +77,19 @@ def sessions_for(user):
 
 
 def session_of_file(file):
-    """Session d'import à laquelle appartient le fichier (stat ou récap), ou None."""
+    """Session d'import à laquelle appartient le fichier (stat ou l'un des récaps), ou None."""
     return (
         ImportSession.objects.filter(stat_file=file).first()
         or ImportSession.objects.filter(recap_file=file).first()
+        or ImportSession.objects.filter(recap_files=file).first()
     )
+
+
+def session_files(session):
+    """Tous les fichiers d'une session : statistique et récaps."""
+    ids = {session.stat_file_id, session.recap_file_id}
+    ids.update(session.recap_files.values_list('pk', flat=True))
+    return File.objects.filter(pk__in=ids)
 
 
 def _is_territorial_admin_of(user, country_id):
@@ -126,7 +134,7 @@ def file_paths(*fields):
 
 def stored_paths(session):
     """Chemins sur disque des fichiers d'une session (à effacer après suppression)."""
-    paths = file_paths(session.stat_file.file, session.recap_file.file, session.error_file)
+    paths = file_paths(*(f.file for f in session_files(session)), session.error_file)
     if session.log_file_path:
         log_path = os.path.abspath(session.log_file_path)
         # On n'efface un journal que s'il est sous MEDIA_ROOT

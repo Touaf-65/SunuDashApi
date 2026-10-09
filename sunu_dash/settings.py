@@ -152,6 +152,12 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 # Taille maximale de chaque fichier importé (stat / récap)
 IMPORT_FILE_MAX_SIZE = 50 * 1024 * 1024
+# Un import = 1 fichier statistique + jusqu'à IMPORT_MAX_RECAP_FILES récaps (un export paginé en compte
+# plus de 200), dans la limite de IMPORT_MAX_TOTAL_SIZE par envoi
+IMPORT_MAX_RECAP_FILES = 300
+IMPORT_MAX_TOTAL_SIZE = 200 * 1024 * 1024
+# Django refuse par défaut un envoi de plus de 100 fichiers
+DATA_UPLOAD_MAX_NUMBER_FILES = IMPORT_MAX_RECAP_FILES + 1
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field

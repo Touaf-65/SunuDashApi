@@ -1,119 +1,158 @@
-import traceback
+from django.conf import settings
+from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from django.http import FileResponse
 from rest_framework import status
-from django.core.exceptions import ValidationError
-from users.permissions import IsTerritorialAdmin,IsTerritorialAdminAndAssignedCountry, IsChefDeptTech
-from .services.importer_service import ImporterService
-from .services.comparison_service import ComparisonService
-from .services.cleaning_service import CleaningService
-# from .services.data_mapper import importer_data
-from django.core.files.uploadedfile import UploadedFile
-from file_handling.models import File
-from file_handling.access import CanAccessCountryFiles, validate_uploaded_file, MAX_UPLOAD_SIZE
 
-from .utils.functions import *
+from file_handling.access import (
+    CanAccessCountryFiles, validate_uploaded_file, sessions_for, can_delete,
+)
+from file_handling.models import ImportSession
+from file_handling.serializers import ImportSessionSerializer
+from .reconciliation.sources import SourceError, is_lock_file
+from .services import analysis_service
+
+# Nombre maximal de récaps par import (un export paginé en compte plus de 200) et taille totale d'un envoi
+MAX_RECAP_FILES = getattr(settings, 'IMPORT_MAX_RECAP_FILES', 300)
+MAX_TOTAL_SIZE = getattr(settings, 'IMPORT_MAX_TOTAL_SIZE', 200 * 1024 * 1024)
+
+ANALYSE_FORBIDDEN_MESSAGE = "Seul l'auteur de cet import (ou l'admin territorial) peut relancer son rapprochement."
+
+
+def _session_payload(session, request, **extra):
+    data = {'session': ImportSessionSerializer(session, context={'request': request}).data}
+    data.update(extra)
+    return data
+
+
+def _analyse_response(session, request):
+    """Réponse après rapprochement : 200 si le rapport est produit, 422 si l'analyse s'est arrêtée
+    (mauvais fichier, colonne absente, aucune période commune…), avec le motif dans `detail`."""
+    payload = _session_payload(session, request, detail=session.message)
+    if session.status == ImportSession.Status.ANALYSED:
+        return Response(payload, status=status.HTTP_200_OK)
+    return Response(payload, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+
+def _sheet_or_error(session, sheet):
+    """(feuilles, message d'erreur ou None) pour la feuille demandée."""
+    try:
+        sheets = analysis_service.stat_sheets(session)
+    except SourceError as exc:
+        return [], str(exc)
+    if sheet and sheets and sheet not in sheets:
+        return sheets, f"La feuille « {sheet} » n'existe pas dans le fichier statistique."
+    return sheets, None
+
 
 class FileUploadAndImportView(APIView):
+    """
+    Dépôt d'un fichier statistique et d'un ou plusieurs récaps, puis rapprochement (lots I1 et I2).
+    Rien n'est écrit dans les tables métier : le résultat est un rapport Excel et des chiffres sur la session.
+
+    Champs : stat_file, recap_files (plusieurs ; recap_file accepté pour un seul), stat_sheet (facultatif).
+    Si le fichier statistique a plusieurs feuilles et qu'aucune n'est donnée, la session attend le choix
+    de la feuille (statut AWAITING_SHEET, liste dans `sheets`) : POST /import-sessions/<id>/analyse/.
+    """
     parser_classes = [MultiPartParser]
     # Admin territorial ou chef de département technique, rattaché à un pays
     permission_classes = [IsAuthenticated, CanAccessCountryFiles]
 
-    expected_stat_headers = [
-        "Nom Employeur", "Broker Name", "Nom bénéficiaire", "Acte_Contraté_Assuré",
-        "Statut Assuré", "Numero de police", "Nom Assuré Principal", "Nom du partenaire",
-        "Adresse du Partenaire", "Pays du partenaire", "Numero de sinistre", "Statut",
-        "Date de sinistre", "Date de règlement", "Categorie d'acte", "Famille Acte",
-        "Nom Acte", "Montant facturé", "N°cheque/Autre_Moyent_de_payement",
-        "Note Générale", "Numero de Facture", "Modifié par"
-    ]
-
-    expected_recap_headers = [
-        "reglementId", "date_reglement", "beneficiaire", "N°_Cheque",
-        "autres_Moyen_de_payement", "partnerId", "Assurés_principal", "Employeur",
-        "N°_police", "totalmttreclame", "totalmttrembourse", "NumFacture", "Note"
-    ]
-
     def post(self, request, *args, **kwargs):
-        # Refus avant lecture du corps : deux fichiers de 50 Mo maximum (+ marge pour l'enveloppe multipart)
+        # Refus avant lecture du corps
         try:
             content_length = int(request.META.get('CONTENT_LENGTH') or 0)
         except ValueError:
             content_length = 0
-        if content_length > 2 * MAX_UPLOAD_SIZE + 1024 * 1024:
-            return Response({'detail': f'Fichiers trop volumineux (maximum {MAX_UPLOAD_SIZE // (1024 * 1024)} Mo par fichier).'},
+        if content_length > MAX_TOTAL_SIZE:
+            return Response({'detail': f"Envoi trop volumineux (maximum {MAX_TOTAL_SIZE // (1024 * 1024)} Mo au total)."},
                             status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
 
         stat_file = request.FILES.get('stat_file')
-        recap_file = request.FILES.get('recap_file')
+        recap_uploads = request.FILES.getlist('recap_files') or request.FILES.getlist('recap_file')
+        # Fichiers verrous d'Excel (~$classeur.xlsx) déposés avec un dossier : ignorés
+        recap_uploads = [f for f in recap_uploads if not is_lock_file(f.name)]
+        sheet = (request.data.get('stat_sheet') or '').strip() or None
         user = request.user
-        country = getattr(user, 'country', None)  
+        country = user.country
 
-
-        if not stat_file or not recap_file:
-            return Response({'detail': 'Les deux fichiers (stat et recap) sont requis.'},
+        if not stat_file or not recap_uploads:
+            return Response({'detail': 'Le fichier statistique et au moins un fichier récap sont requis.'},
                             status=status.HTTP_400_BAD_REQUEST)
-        if not country:
-            return Response({'detail': 'Utilisateur sans pays associé.'},
+        if len(recap_uploads) > MAX_RECAP_FILES:
+            return Response({'detail': f"Trop de fichiers récap ({len(recap_uploads)}) : {MAX_RECAP_FILES} au maximum par import."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        file_errors = [
-            err for err in (
-                validate_uploaded_file(stat_file, 'Fichier statistique'),
-                validate_uploaded_file(recap_file, 'Fichier récap'),
-            ) if err
-        ]
+        file_errors = [validate_uploaded_file(stat_file, f'Fichier statistique ({stat_file.name})')]
+        file_errors += [validate_uploaded_file(f, f'Récap {f.name}') for f in recap_uploads]
+        file_errors = [e for e in file_errors if e]
         if file_errors:
-            return Response({'detail': ' '.join(file_errors), 'errors': file_errors},
+            return Response({'detail': ' '.join(file_errors[:5]) + (' …' if len(file_errors) > 5 else ''),
+                             'errors': file_errors},
                             status=status.HTTP_400_BAD_REQUEST)
 
+        session = analysis_service.create_session(user, country, stat_file, recap_uploads)
+        sheets, error = _sheet_or_error(session, sheet)
+        if error:
+            analysis_service._fail(session, error)
+            return Response(_session_payload(session, request, detail=error, sheets=sheets),
+                            status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
+        if sheet is None and len(sheets) > 1:
+            session.status = ImportSession.Status.AWAITING_SHEET
+            session.message = "Le fichier statistique contient plusieurs feuilles : choisissez celle à rapprocher."
+            session.save(update_fields=['status', 'message'])
+            return Response(_session_payload(session, request, detail=session.message, sheets=sheets),
+                            status=status.HTTP_200_OK)
+
+        analysis_service.analyse(session, sheet or (sheets[0] if sheets else None))
+        return _analyse_response(session, request)
+
+
+class ImportSessionSheetsView(APIView):
+    """Feuilles du fichier statistique d'une session (pour choisir ou changer de feuille)."""
+    permission_classes = [IsAuthenticated, CanAccessCountryFiles]
+
+    def get(self, request, pk):
+        session = get_object_or_404(sessions_for(request.user), pk=pk)
         try:
-            df_stat = open_excel_csv(stat_file)
-            df_recap = open_excel_csv(recap_file)
+            sheets = analysis_service.stat_sheets(session)
+        except SourceError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        except FileNotFoundError:
+            return Response({'detail': "Le fichier statistique n'est plus disponible sur le serveur."},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response({'sheets': sheets, 'current': session.stat_sheet})
 
-            missing_stat = [h for h in self.expected_stat_headers if h not in df_stat.columns]
-            missing_recap = [h for h in self.expected_recap_headers if h not in df_recap.columns]
 
-            if missing_stat or missing_recap:
-                return Response({
-                    "errors": {
-                        "stat_file_missing": missing_stat,
-                        "recap_file_missing": missing_recap
-                    }
-                }, status=status.HTTP_400_BAD_REQUEST)
+class ImportSessionAnalyseView(APIView):
+    """Rapprochement (ou nouveau rapprochement, sur une autre feuille) d'une session déjà déposée.
+    Corps JSON : {"stat_sheet": "<nom de la feuille>"}. Mêmes droits que la suppression de la session."""
+    parser_classes = [JSONParser, MultiPartParser]
+    permission_classes = [IsAuthenticated, CanAccessCountryFiles]
 
-        except Exception as e:
-            return Response({'detail': 'Une erreur est survenue : ' + str(e)},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        try:
-            importer = ImporterService(
-                user=user,
-                country=country,
-                stat_file=stat_file,
-                recap_file=recap_file
-            )
-            print("##VIEWS: ImporterService instancié")
-            success = importer.run()
+    ALLOWED = (ImportSession.Status.AWAITING_SHEET, ImportSession.Status.ANALYSED, ImportSession.Status.ERROR)
 
-            if success:
-                return Response({'detail': 'Import lancé avec succès.', 'session_id': importer.import_session.id})
-            else:
-                return Response({'detail': 'Import terminé avec erreurs.', 'session_id': importer.import_session.id},
-                                status=status.HTTP_202_ACCEPTED)
+    def post(self, request, pk):
+        session = get_object_or_404(sessions_for(request.user).select_related('stat_file', 'user'), pk=pk)
+        if not can_delete(request.user, session):
+            return Response({'detail': ANALYSE_FORBIDDEN_MESSAGE}, status=status.HTTP_403_FORBIDDEN)
+        if session.status not in self.ALLOWED:
+            return Response({'detail': "Cette session ne peut plus être rapprochée."},
+                            status=status.HTTP_409_CONFLICT)
 
-        except ValidationError as ve:
-            print("ValidationError :", str(ve))
-            return Response({'detail': str(ve)}, status=status.HTTP_400_BAD_REQUEST)
+        sheet = (request.data.get('stat_sheet') or '').strip() or None
+        sheets, error = _sheet_or_error(session, sheet)
+        if error:
+            return Response({'detail': error, 'sheets': sheets}, status=status.HTTP_400_BAD_REQUEST)
+        if sheet is None and len(sheets) > 1:
+            return Response({'detail': 'Choisissez la feuille du fichier statistique à rapprocher.', 'sheets': sheets},
+                            status=status.HTTP_400_BAD_REQUEST)
 
-        except Exception as e:
-            print("Exception complète :\n", traceback.format_exc())
-            return Response({'detail': 'Une erreur est survenue : ' + str(e)},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        analysis_service.analyse(session, sheet or (sheets[0] if sheets else None))
+        return _analyse_response(session, request)
 
 
 import os

@@ -12,7 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from .models import File
 from .serializers import FileSerializer, ImportSessionSerializer
 from .access import (
-    CanAccessCountryFiles, files_for, sessions_for, session_of_file, can_delete,
+    CanAccessCountryFiles, files_for, sessions_for, session_of_file, session_files, can_delete,
     stored_paths, file_paths, remove_paths, DELETE_FORBIDDEN_MESSAGE,
 )
 from importer.utils.functions import open_excel_csv
@@ -30,13 +30,13 @@ def _open_stored(field_file):
 
 
 def _delete_session(session):
-    """Supprime la session entière (fichiers stat + récap, rapport, journal).
+    """Supprime la session entière (fichier stat, tous les récaps, rapport, journal).
     Les données importées restent en base, détachées du fichier (on_delete=SET_NULL)."""
     paths = stored_paths(session)
-    stat_file, recap_file = session.stat_file, session.recap_file
+    file_ids = list(session_files(session).values_list('pk', flat=True))
     with transaction.atomic():
         session.delete()
-        File.objects.filter(pk__in=[stat_file.pk, recap_file.pk]).delete()
+        File.objects.filter(pk__in=file_ids).delete()
         transaction.on_commit(lambda: remove_paths(paths))
 
 
@@ -50,7 +50,7 @@ class FileListView(APIView):
 
 
 class FileDeleteView(APIView):
-    """Supprime la session d'import à laquelle appartient le fichier (les deux fichiers partent ensemble)."""
+    """Supprime la session d'import à laquelle appartient le fichier (fichier statistique et récaps partent ensemble)."""
     permission_classes = FILE_PERMISSIONS
 
     def delete(self, request, pk):
@@ -62,7 +62,7 @@ class FileDeleteView(APIView):
 
         if session:
             _delete_session(session)
-            return Response({"detail": "Import supprimé (fichier statistique et fichier récap)."},
+            return Response({"detail": "Import supprimé (fichier statistique et récaps)."},
                             status=status.HTTP_200_OK)
 
         paths = file_paths(file.file)
@@ -127,7 +127,7 @@ class ImportSessionDeleteView(APIView):
         if not can_delete(request.user, session):
             return Response({"error": DELETE_FORBIDDEN_MESSAGE}, status=status.HTTP_403_FORBIDDEN)
         _delete_session(session)
-        return Response({"detail": "Import supprimé (fichier statistique et fichier récap)."},
+        return Response({"detail": "Import supprimé (fichier statistique et récaps)."},
                         status=status.HTTP_200_OK)
 
 

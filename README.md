@@ -20,10 +20,11 @@ Django 5.1 · Django REST Framework · JWT (SimpleJWT) · PostgreSQL 16 · Celer
 6. [Imports de comptes et de pays (Excel / CSV)](#imports-de-comptes-et-de-pays-excel--csv)
 7. [Gestion des pays](#gestion-des-pays)
 8. [Fichiers importés (sinistres) : sécurité](#fichiers-importés-sinistres--sécurité)
-9. [E-mails envoyés](#e-mails-envoyés)
-10. [Référence des routes](#référence-des-routes)
-11. [Codes de réponse à connaître](#codes-de-réponse-à-connaître)
-12. [État des modules](#état-des-modules)
+9. [Import des sinistres : lecture et rapprochement](#import-des-sinistres--lecture-et-rapprochement)
+10. [E-mails envoyés](#e-mails-envoyés)
+11. [Référence des routes](#référence-des-routes)
+12. [Codes de réponse à connaître](#codes-de-réponse-à-connaître)
+13. [État des modules](#état-des-modules)
 
 ---
 
@@ -211,13 +212,42 @@ Règles centralisées dans `file_handling/access.py`. Le traitement de l'import 
 
 - **Isolement par pays** : pour un autre pays, un fichier ou une session répond **404** (comme s'il n'existait pas).
   Les autres rôles (RESP_OPERATEUR, ADMIN_GLOBAL, SUPERUSER) reçoivent **403**.
-- La **suppression** porte toujours sur **l'import entier** : fichier statistique + fichier récap + journal + rapport,
+- La **suppression** porte toujours sur **l'import entier** : fichier statistique + tous les récaps + journal + rapport,
   en base et sur disque. Les données déjà importées restent en base, détachées du fichier.
 - Le **rôle de l'auteur** est enregistré au chargement (`uploaded_by_role`) : les droits ne changent pas si son compte change ensuite.
 - **Contrôles à l'import** : `.xlsx`, `.xls`, `.csv` uniquement, **contenu vérifié** (un exécutable renommé est refusé),
   fichier non vide, **50 Mo maximum** par fichier (`IMPORT_FILE_MAX_SIZE`).
 - Les fichiers **ne sont jamais servis par `/media/`** : uniquement par les routes ci-dessous, avec jeton. Les réponses de
   l'API n'exposent pas leur chemin sur le serveur ; `can_delete` indique au frontend s'il peut proposer la suppression.
+
+---
+
+## Import des sinistres : lecture et rapprochement
+
+Code : `importer/reconciliation/` (sans accès à la base) et `importer/services/analysis_service.py`.
+**État actuel (lots I1-I2) : rien n'est écrit dans les tables métier** ; un import produit un rapport Excel et des
+chiffres sur la session. L'écriture en base viendra au lot I3.
+
+1. **Dépôt** : un fichier statistique et **un ou plusieurs récaps** (pages d'un même export ; jusqu'à
+   `IMPORT_MAX_RECAP_FILES` = 300 fichiers et `IMPORT_MAX_TOTAL_SIZE` = 200 Mo par envoi). Les fichiers verrous d'Excel
+   (`~$…`) sont ignorés.
+2. **Feuille** : si le fichier statistique a plusieurs feuilles et qu'aucune n'est donnée, la session passe en
+   `AWAITING_SHEET` et la réponse liste les feuilles ; le choix se fait par `/import-sessions/<id>/analyse/`.
+3. **Nature des fichiers** reconnue par leurs colonnes (fichiers inversés, colonne obligatoire absente ou sans titre → arrêt).
+4. **Correspondance des colonnes** vers des noms communs (`columns.py`) ; dates (série Excel, `jj-mm-aaaa`…) et montants normalisés.
+5. **Récaps** fusionnés, lignes strictement identiques retirées ; sinistres sans date de règlement = **non payés** (exclus, listés).
+6. **Période commune** sur la date de règlement ; aucune → arrêt (statut `ERROR`), message avec les deux plages.
+7. **Rapprochement** par sinistre (somme des lignes d'actes de la statistique contre le total du récap, tolérance < 5) :
+   conforme, annulé (contre-passation à total nul), écart de montant, absent du récap, doublon divergent du récap,
+   lignes illisibles. Statut `ANALYSED`, chiffres dans `summary`, rapport dans `error_file` (`?type=error`).
+
+Pour essayer sur des fichiers locaux, sans passer par l'interface :
+
+```bash
+python manage.py analyse_import --stat "Stat.xlsx"                       # liste les feuilles
+python manage.py analyse_import --stat "Stat.xlsx" --feuille "Janv - Déc + Tardifs" \
+    --recap ../Donnees_SUNU/Recap --rapport rapport.xlsx
+```
 
 ---
 
@@ -264,7 +294,9 @@ Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
 ### Fichiers et imports — `/data/`, `/files/`, `/import-sessions/`
 | Méthode | Route | Accès |
 |---|---|---|
-| POST | `/data/upload/` (multipart `stat_file`, `recap_file`) | ADMIN_TERRITORIAL, CHEF_DEPT_TECH avec pays |
+| POST | `/data/upload/` (multipart `stat_file`, `recap_files` × n, `stat_sheet` facultatif) → 200 (`ANALYSED` ou `AWAITING_SHEET` + `sheets`), 422 si l'analyse s'arrête | ADMIN_TERRITORIAL, CHEF_DEPT_TECH avec pays |
+| GET | `/import-sessions/<id>/sheets/` | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
+| POST | `/import-sessions/<id>/analyse/` (`{"stat_sheet"}`) : rapprochement ou nouveau rapprochement | Mêmes droits que la suppression |
 | GET | `/files/`, `/files/<id>/download/`, `/files/<id>/preview/` | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
 | DELETE | `/files/<id>/delete/` (supprime l'import entier du fichier) | Voir les règles de suppression |
 | GET | `/import-sessions/`, `/import-sessions/<id>/download/?type=log` ou `?type=error` | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
@@ -292,6 +324,6 @@ Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
 | Comptes, authentification, rôles | ✅ Revu et testé (tests de bout en bout par HTTP réel) |
 | Pays (y compris désactivation au quorum et gel) | ✅ Revu et testé |
 | Sécurité des fichiers importés (`file_handling`) | ✅ Revue et testée |
-| Import des sinistres (`importer`) | 🔧 **En cours de refonte** : fiabilité des sessions d'import, rapports de non-conformité |
+| Import des sinistres (`importer`) | 🔧 **En cours de refonte** : lecture et rapprochement avec rapport ✅ (I1-I2) ; écriture en base et nouveau modèle à venir (I3) |
 | Multi-devises | 📐 Conception arrêtée (devises par pays, taux datés saisis par les admins, devise choisie à l'import) — à développer |
 | Tableaux de bord et statistiques (`dashboard`) | ⏳ À revoir |

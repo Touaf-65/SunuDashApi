@@ -69,7 +69,11 @@ class ImportSession(models.Model):
     """
     class Status(models.TextChoices):
         PENDING = 'PENDING', 'Pending'
+        # Le fichier statistique a plusieurs feuilles : l'utilisateur choisit celle à rapprocher
+        AWAITING_SHEET = 'AWAITING_SHEET', 'Awaiting sheet choice'
         PROCESSING = 'PROCESSING', 'Processing'
+        # Rapprochement fait et rapport produit, rien d'écrit en base (lot I2)
+        ANALYSED = 'ANALYSED', 'Analysed'
         DONE = 'DONE', 'Done'
         ERROR = 'ERROR', 'Error'
         DONE_WITH_ERRORS = 'DONE_WITH_ERRORS', 'Done with Errors'
@@ -83,8 +87,14 @@ class ImportSession(models.Model):
 
     country = models.ForeignKey(Country, on_delete=models.CASCADE)
     stat_file = models.ForeignKey(File, on_delete=models.CASCADE, related_name='stat_sessions')
+    # Premier récap (compatibilité) ; tous les récaps de la session sont dans recap_files
     recap_file = models.ForeignKey(File, on_delete=models.CASCADE, related_name='recap_sessions')
-    
+    recap_files = models.ManyToManyField(File, blank=True, related_name='recap_set_sessions')
+    # Feuille du fichier statistique choisie pour le rapprochement (vide : CSV ou classeur à une feuille)
+    stat_sheet = models.CharField(max_length=255, blank=True, default='')
+    # Chiffres du rapprochement (périodes, sinistres par catégorie, importables), voir reconciliation/engine.py
+    summary = models.JSONField(null=True, blank=True)
+
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
