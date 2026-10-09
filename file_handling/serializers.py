@@ -10,6 +10,7 @@ class FileSerializer(serializers.ModelSerializer):
     download_url = serializers.SerializerMethodField()
     preview_url = serializers.SerializerMethodField()
     import_session = serializers.SerializerMethodField()
+    claims_count = serializers.SerializerMethodField()
     can_delete = serializers.SerializerMethodField()
 
     class Meta:
@@ -17,7 +18,7 @@ class FileSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'file_type', 'uploaded_at', 'size', 'user', 'country',
             'uploaded_by_name', 'uploaded_by_role',
-            'download_url', 'preview_url', 'import_session', 'can_delete',
+            'download_url', 'preview_url', 'import_session', 'claims_count', 'can_delete',
         ]
         read_only_fields = fields
 
@@ -30,6 +31,11 @@ class FileSerializer(serializers.ModelSerializer):
     def get_import_session(self, obj):
         session = session_of_file(obj)
         return session.id if session else None
+
+    def get_claims_count(self, obj):
+        """Sinistres écrits en base par l'import du fichier (proposés à la suppression avec lui)."""
+        session = session_of_file(obj)
+        return session.imported_claims.count() if session else 0
 
     def get_can_delete(self, obj):
         request = self.context.get('request')
@@ -46,6 +52,7 @@ class ImportSessionSerializer(serializers.ModelSerializer):
     recap_file = FileSerializer(read_only=True)
 
     recap_files_count = serializers.SerializerMethodField()
+    claims_count = serializers.SerializerMethodField()
     error_file_url = serializers.SerializerMethodField()
     log_file_url = serializers.SerializerMethodField()
     can_delete = serializers.SerializerMethodField()
@@ -55,11 +62,14 @@ class ImportSessionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'country', 'stat_file', 'recap_file', 'recap_files_count', 'stat_sheet', 'status',
             'created_at', 'started_at', 'completed_at', 'message', 'start_date', 'end_date', 'summary', 'currency',
-            'claims_created_count', 'insured_created_count', 'total_claimed_amount', 'total_reimbursed_amount',
+            'claims_created_count', 'claims_count', 'insured_created_count', 'total_claimed_amount', 'total_reimbursed_amount',
             'uploaded_by_name', 'uploaded_by_role',
             'error_file_url', 'log_file_url', 'can_delete',
         ]
         read_only_fields = fields
+
+    def get_claims_count(self, obj):
+        return obj.imported_claims.count()
 
     def get_recap_files_count(self, obj):
         return obj.recap_files.count() or 1

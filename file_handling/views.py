@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
+from core.models import Claim
 from .models import File
 from .serializers import FileSerializer, ImportSessionSerializer
 from .access import (
@@ -29,15 +30,50 @@ def _open_stored(field_file):
         raise Http404("Le fichier n'est plus disponible sur le serveur.")
 
 
-def _delete_session(session):
-    """Supprime la session entière (fichier stat, tous les récaps, rapport, journal).
-    Les données importées restent en base, détachées du fichier (on_delete=SET_NULL)."""
+INVALID_PASSWORD_MESSAGE = "Mot de passe incorrect : rien n'a été supprimé."
+
+
+def _wants_claims_deleted(request):
+    value = request.data.get('delete_claims', False) if hasattr(request, 'data') else False
+    return value is True or str(value).lower() in ('true', '1', 'oui', 'yes')
+
+
+def _check_deletion(request):
+    """(supprimer les sinistres ?, réponse d'erreur ou None). Supprimer les sinistres importés exige le mot de
+    passe de l'utilisateur connecté, vérifié ici (décision du 09/10) : le navigateur ne peut pas s'en dispenser."""
+    delete_claims = _wants_claims_deleted(request)
+    if delete_claims and not request.user.check_password(request.data.get('password') or ''):
+        return delete_claims, Response({"error": INVALID_PASSWORD_MESSAGE, "code": "invalid_password"},
+                                        status=status.HTTP_403_FORBIDDEN)
+    return delete_claims, None
+
+
+def _delete_session(session, delete_claims=False):
+    """Supprime la session entière (fichier stat, tous les récaps, rapport, journal) ; avec `delete_claims`, aussi
+    les sinistres qu'elle a importés (et leurs lignes d'actes). Sinon ils restent en base, détachés de l'import.
+    Les référentiels (assurés, polices, partenaires…) sont conservés : d'autres imports peuvent s'en servir.
+    Renvoie le nombre de sinistres supprimés."""
     paths = stored_paths(session)
     file_ids = list(session_files(session).values_list('pk', flat=True))
     with transaction.atomic():
+        deleted_claims = 0
+        if delete_claims:
+            claims = Claim.objects.filter(import_session=session)
+            deleted_claims = claims.count()
+            claims.delete()
         session.delete()
         File.objects.filter(pk__in=file_ids).delete()
         transaction.on_commit(lambda: remove_paths(paths))
+    return deleted_claims
+
+
+def _session_deleted_response(deleted_claims, delete_claims):
+    detail = "Import supprimé (fichier statistique et récaps)"
+    if delete_claims:
+        detail += f", ainsi que {deleted_claims} sinistre(s) importé(s)."
+    else:
+        detail += " ; les sinistres importés sont conservés."
+    return Response({"detail": detail, "deleted_claims": deleted_claims}, status=status.HTTP_200_OK)
 
 
 class FileListView(APIView):
@@ -61,9 +97,10 @@ class FileDeleteView(APIView):
             return Response({"error": DELETE_FORBIDDEN_MESSAGE}, status=status.HTTP_403_FORBIDDEN)
 
         if session:
-            _delete_session(session)
-            return Response({"detail": "Import supprimé (fichier statistique et récaps)."},
-                            status=status.HTTP_200_OK)
+            delete_claims, error = _check_deletion(request)
+            if error:
+                return error
+            return _session_deleted_response(_delete_session(session, delete_claims), delete_claims)
 
         paths = file_paths(file.file)
         with transaction.atomic():
@@ -126,9 +163,10 @@ class ImportSessionDeleteView(APIView):
         session = get_object_or_404(sessions_for(request.user).select_related('stat_file', 'recap_file', 'user'), pk=pk)
         if not can_delete(request.user, session):
             return Response({"error": DELETE_FORBIDDEN_MESSAGE}, status=status.HTTP_403_FORBIDDEN)
-        _delete_session(session)
-        return Response({"detail": "Import supprimé (fichier statistique et récaps)."},
-                        status=status.HTTP_200_OK)
+        delete_claims, error = _check_deletion(request)
+        if error:
+            return error
+        return _session_deleted_response(_delete_session(session, delete_claims), delete_claims)
 
 
 class ImportSessionDownloadView(APIView):

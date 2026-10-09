@@ -213,7 +213,10 @@ Règles centralisées dans `file_handling/access.py`. Le traitement de l'import 
 - **Isolement par pays** : pour un autre pays, un fichier ou une session répond **404** (comme s'il n'existait pas).
   Les autres rôles (RESP_OPERATEUR, ADMIN_GLOBAL, SUPERUSER) reçoivent **403**.
 - La **suppression** porte toujours sur **l'import entier** : fichier statistique + tous les récaps + journal + rapport,
-  en base et sur disque. Les données déjà importées restent en base, détachées du fichier.
+  en base et sur disque. Les sinistres qu'il a écrits en base restent, détachés de l'import, sauf si la requête
+  demande `{"delete_claims": true, "password": "…"}` : le mot de passe de l'utilisateur connecté est alors vérifié
+  par l'API (403 `invalid_password` sinon, rien n'est supprimé), puis les sinistres et leurs lignes sont supprimés.
+  Les référentiels (assurés, polices, partenaires…) restent. `claims_count` (fichiers, sessions) donne leur nombre.
 - Le **rôle de l'auteur** est enregistré au chargement (`uploaded_by_role`) : les droits ne changent pas si son compte change ensuite.
 - **Contrôles à l'import** : `.xlsx`, `.xls`, `.csv` uniquement, **contenu vérifié** (un exécutable renommé est refusé),
   fichier non vide, **50 Mo maximum** par fichier (`IMPORT_FILE_MAX_SIZE`).
