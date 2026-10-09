@@ -21,10 +21,11 @@ Django 5.1 · Django REST Framework · JWT (SimpleJWT) · PostgreSQL 16 · Celer
 7. [Gestion des pays](#gestion-des-pays)
 8. [Fichiers importés (sinistres) : sécurité](#fichiers-importés-sinistres--sécurité)
 9. [Import des sinistres : lecture et rapprochement](#import-des-sinistres--lecture-et-rapprochement)
-10. [E-mails envoyés](#e-mails-envoyés)
-11. [Référence des routes](#référence-des-routes)
-12. [Codes de réponse à connaître](#codes-de-réponse-à-connaître)
-13. [État des modules](#état-des-modules)
+10. [Familles d'assurés](#familles-dassurés)
+11. [E-mails envoyés](#e-mails-envoyés)
+12. [Référence des routes](#référence-des-routes)
+13. [Codes de réponse à connaître](#codes-de-réponse-à-connaître)
+14. [État des modules](#état-des-modules)
 
 ---
 
@@ -268,6 +269,29 @@ python manage.py analyse_import --stat "Stat.xlsx" --feuille "Janv - Déc + Tard
 
 ---
 
+## Familles d'assurés
+
+Une famille = un **assuré principal sur une police** et ses bénéficiaires (conjoints, enfants) sur cette police
+(adhésions `InsuredEmployer` : rôle `primary`, ou `primary_insured_ref` = ce principal). Un principal présent sur deux
+polices a deux familles. Réservé à l'**admin territorial** et au **chef de département technique**, familles de
+**leur pays** (autre pays : 404). Code : `core/services/family_service.py`, `core/family_views.py`.
+
+- **Lecture** : liste (recherche par le nom de n'importe quel membre, mots dans n'importe quel ordre, ou n° de carte ;
+  filtres police, employeur, période de règlement ; tris ; pagination), fiche (membres, consommation par membre, par
+  catégorie d'acte et par mois, sinistres avec leurs lignes, historique des corrections).
+- **Corrections** : rattacher un bénéficiaire à un autre principal de la police ; changer un rôle (un principal qui
+  devient bénéficiaire ne doit plus avoir de bénéficiaires) ; fusionner deux fiches de la même personne (refus si
+  n° de carte différents, si l'une est bénéficiaire de l'autre, ou si leurs rôles diffèrent sur une même adhésion) ;
+  choisir le nom retenu parmi les écritures connues.
+  - Corps JSON avec `password` : mot de passe de l'utilisateur connecté, vérifié **avant** toute modification
+    (403 `invalid_password`) ; refus métier → 400 avec le motif.
+  - Chaque correction est tracée (`FamilyChange` : qui, quand, quoi, familles touchées).
+  - Un réimport ne défait pas les corrections (rôle et principal d'une adhésion existante jamais modifiés ; personne
+    retrouvée par son nom retenu ou ses autres écritures).
+- Pas de plafond de consommation pour l'instant (champ `consumption_limit` non utilisé).
+
+---
+
 ## E-mails envoyés
 
 | Événement | Destinataire | Contenu |
@@ -320,6 +344,17 @@ Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
 | GET | `/import-sessions/`, `/import-sessions/<id>/download/?type=log` ou `?type=error` | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
 | DELETE | `/import-sessions/<id>/delete/` | Voir les règles de suppression |
 
+### Familles — `/families/` (ADMIN_TERRITORIAL, CHEF_DEPT_TECH, familles de leur pays)
+| Méthode | Route |
+|---|---|
+| GET | `/families/?search=&policy=&employer=&start=&end=&ordering=&page=&page_size=` (ordering : `name`, `policy`, `-reimbursed`, `-claims`, `-members`) |
+| GET | `/families/filters/` (polices et employeurs du pays) |
+| GET | `/families/<police>/<principal>/?start=&end=` (fiche) ; `/families/<police>/<principal>/claims/?member=&page=` |
+| GET | `/families/<police>/principals/?search=&exclude=` ; `/families/insureds/?search=&exclude=` (choix d'un principal / d'une fiche) |
+| POST | `/families/<police>/members/<assuré>/attach/` `{"principal_id", "password"}` |
+| POST | `/families/<police>/members/<assuré>/role/` `{"role": "primary"\|"spouse"\|"child"\|"other", "principal_id", "password"}` |
+| POST | `/families/insureds/merge/` `{"keep_id", "absorb_id", "password"}` ; `/families/insureds/<assuré>/name/` `{"name", "password"}` |
+
 ---
 
 ## Codes de réponse à connaître
@@ -343,5 +378,6 @@ Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
 | Pays (y compris désactivation au quorum et gel) | ✅ Revu et testé |
 | Sécurité des fichiers importés (`file_handling`) | ✅ Revue et testée |
 | Import des sinistres (`importer`, `core`) | ✅ Lecture, rapprochement, rapport et écriture en base (I1-I3) ; suivi en tâche de fond à venir (I4) |
+| Familles d'assurés (`core`) | ✅ Consultation et corrections tracées (F1) ; plafonds non gérés |
 | Multi-devises | 📐 Conception arrêtée (devises par pays, taux datés saisis par les admins, devise choisie à l'import) — à développer |
 | Tableaux de bord et statistiques (`dashboard`) | 🔧 Adaptés au nouveau modèle des sinistres (toutes les routes vérifiées après un import réel) ; revue complète à venir |

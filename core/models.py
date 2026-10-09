@@ -10,6 +10,7 @@ Modèle métier des sinistres (lot I3, décisions des 08 et 09/10/2026, voir JOU
 - La « famille d'acte » des fichiers est un libellé de garantie, gardé sur la ligne ; l'acte est rattaché à sa
   catégorie principale, et ses variantes d'écriture passent par la table d'alias (ActAlias).
 """
+from django.conf import settings
 from django.db import models
 from django.db.models import Q
 
@@ -378,3 +379,32 @@ class ClaimLine(models.Model):
 
     def __str__(self):
         return f'{self.claim.number} #{self.line_number}'
+
+
+class FamilyChange(models.Model):
+    """Correction d'une famille faite par l'admin territorial ou le chef de département technique (lot F1) :
+    trace de qui a changé quoi, affichée sur la fiche des familles concernées."""
+    class Action(models.TextChoices):
+        ATTACH = 'ATTACH', 'Rattachement à un autre principal'
+        ROLE = 'ROLE', 'Changement de rôle'
+        MERGE = 'MERGE', 'Fusion de deux fiches'
+        RENAME = 'RENAME', 'Nom retenu'
+
+    country = models.ForeignKey(Country, on_delete=models.CASCADE, related_name='family_changes')
+    policy = models.ForeignKey(Policy, on_delete=models.SET_NULL, null=True, blank=True, related_name='family_changes')
+    # Assurés principaux des familles touchées (avant et après), pour retrouver l'historique d'une famille
+    principals = models.JSONField(default=list, blank=True)
+    insured = models.ForeignKey(Insured, on_delete=models.SET_NULL, null=True, blank=True, related_name='family_changes')
+    action = models.CharField(max_length=10, choices=Action.choices)
+    summary = models.TextField()
+    details = models.JSONField(default=dict, blank=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                             related_name='family_changes')
+    user_name = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f'{self.get_action_display()} — {self.summary}'

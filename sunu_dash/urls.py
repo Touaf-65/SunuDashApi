@@ -9,6 +9,7 @@ urlpatterns = [
     path("files/", include("file_handling.file_urls")),
     path("import-sessions/", include("file_handling.importSession_urls")),
     path("dashboard/", include("dashboard.urls")),
+    path("families/", include("core.family_urls")),
 ]
 
 # MEDIA_ROOT (fichiers importés, journaux, rapports) n'est volontairement PAS servi par une route /media/ :
