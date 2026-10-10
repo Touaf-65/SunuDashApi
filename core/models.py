@@ -27,8 +27,7 @@ class Client(models.Model):
     name = models.CharField(max_length=255)
     name_key = models.CharField(max_length=255, default='', db_index=True)
     country = models.ForeignKey(Country, on_delete=models.CASCADE, related_name='clients')
-    # Prime : encore portée par l'employeur (import des primes) ; passera sur la police (décision L)
-    prime = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    # Les primes sont historisées par période couverte dans Premium (related_name='premiums')
     file = models.ForeignKey(File, on_delete=models.SET_NULL, null=True, blank=True, related_name='clients')
     import_session = models.ForeignKey(ImportSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='imported_clients')
 
@@ -37,20 +36,6 @@ class Client(models.Model):
 
     def __str__(self):
         return self.name
-
-    def update_prime(self, new_prime):
-        ClientPrimeHistory.objects.create(client=self, prime=self.prime)
-        self.prime = new_prime
-        self.save()
-
-
-class ClientPrimeHistory(models.Model):
-    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='prime_history')
-    prime = models.DecimalField(max_digits=10, decimal_places=2)  # valeur historisée du champ prime
-    date = models.DateTimeField(auto_now_add=True)  # date de modification du champ prime
-
-    def __str__(self):
-        return f"{self.client.name} - {self.date}"
 
 
 class Subscriber(models.Model):

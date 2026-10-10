@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (
-    Client, ClientPrimeHistory, Policy, Insured, InsuredEmployer,
+    Client, Policy, Insured, InsuredEmployer,
     Invoice, Partner, PaymentMethod, Act, ActFamily, ActCategory,
     Operator, Claim
 )
@@ -33,14 +33,6 @@ class ClientSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Client
-        fields = '__all__'
-
-
-class ClientPrimeHistorySerializer(serializers.ModelSerializer):
-    client = serializers.PrimaryKeyRelatedField(queryset=Client.objects.all())
-
-    class Meta:
-        model = ClientPrimeHistory
         fields = '__all__'
 
 

@@ -65,7 +65,7 @@ core/
 ### Core Entities (13 Models)
 
 1. **Client** - Employers and organizations
-2. **ClientPrimeHistory** - Premium change audit trail
+2. **Premium** - Employer premium per covered period (history)
 3. **Policy** - Insurance contracts
 4. **Insured** - Covered individuals with family structure
 5. **InsuredEmployer** - Complex employment relationships
@@ -85,7 +85,7 @@ Country (Geographic Root)
 ├── Client (Employers)
 │   ├── Policy (Insurance Contracts)
 │   │   └── InsuredEmployer (Employment Links)
-│   └── ClientPrimeHistory (Premium Changes)
+│   └── Premium (per covered period)
 ├── Partner (Healthcare Providers)
 │   ├── Invoice (Medical Bills)
 │   └── PaymentMethod (Payment Tracking)

@@ -89,7 +89,6 @@ class Client(models.Model):
     modification_date = models.DateTimeField(blank=True, null=True)
     name = models.CharField(max_length=255)
     country = models.ForeignKey(Country, on_delete=models.CASCADE, related_name='clients')
-    prime = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     file = models.ForeignKey(File, on_delete=models.SET_NULL, null=True, blank=True, related_name='clients')
     import_session = models.ForeignKey(ImportSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='imported_clients')
 ```
@@ -97,7 +96,7 @@ class Client(models.Model):
 **Purpose**: Represents employers or organizations that purchase insurance policies.
 
 **Key Features**:
-- **Prime Management**: Tracks insurance premiums with historical changes
+- **Premiums**: one `Premium` per covered period (`client.premiums`, see `core/services/premium_service.py`)
 - **Country Association**: Links clients to specific countries
 - **Import Tracking**: Tracks data import sessions and source files
 - **Contact Information**: Stores client contact details
@@ -109,22 +108,10 @@ class Client(models.Model):
 - `File`: Tracks source file for data import
 - `ImportSession`: Tracks import session for audit trail
 
-### 2. ClientPrimeHistory Model
-**File**: `core/models.py`
-
-```python
-class ClientPrimeHistory(models.Model):
-    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='prime_history')
-    prime = models.DecimalField(max_digits=10, decimal_places=2)
-    date = models.DateTimeField(auto_now_add=True)
-```
-
-**Purpose**: Maintains historical record of client premium changes.
-
-**Key Features**:
-- **Audit Trail**: Tracks all premium modifications
-- **Timestamp**: Records exact date of changes
-- **Data Integrity**: Preserves historical premium values
+### 2. Premium Model
+**File**: `core/models.py` — premium of an employer for one covered period (amount, currency, start/end date,
+source MANUAL / IMPORT), no overlapping periods; changes logged in `ReferenceChange`. Replaces the former
+`Client.prime` field and `ClientPrimeHistory` model (removed in migration `0010_drop_client_prime`).
 
 ### 3. Policy Model
 **File**: `core/models.py`
