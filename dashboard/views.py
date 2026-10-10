@@ -411,7 +411,8 @@ class SpecificClientStatisticsDetailView(APIView):
     """
     permission_classes = [StatisticsAccess]
 
-    def post(self, request, country_id, client_id):
+    def post(self, request, client_id, country_id=None):
+        # country_id : facultatif (route clients/<id>/statistics/) ; le pays de l'employeur est contrôlé par StatisticsAccess
         """
         Retrieve comprehensive statistics for a specific client over a given time period.
         

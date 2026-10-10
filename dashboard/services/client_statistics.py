@@ -2,6 +2,7 @@ from django.db.models import Sum, Count, Q, Max
 from django.core.exceptions import ValidationError
 from core.models import Client, Claim, InsuredEmployer, Policy, Insured, Partner, Act, ActCategory
 from .base import (
+    sanitize_float,
     get_granularity, get_trunc_function, parse_date_range,
     generate_periods, fill_full_series, serie_to_pairs,
     compute_evolution_rate, format_series_for_multi_line_chart,
@@ -15,19 +16,6 @@ from .country_statistics import ROLE_LABELS
 import logging
 import json
 import math
-
-def sanitize_float(value):
-    """Sanitize float values to ensure JSON serialization compatibility."""
-    if isinstance(value, float):
-        if math.isnan(value) or math.isinf(value):
-            return 0.0  # Replace NaN/inf with 0
-        return round(value, 4)  # 4 décimales : garde la précision des ratios S/P
-    elif isinstance(value, dict):
-        return {key: sanitize_float(val) for key, val in value.items()}
-    elif isinstance(value, list):
-        return [sanitize_float(val) for val in value]
-    else:
-        return value
 
 logger = logging.getLogger(__name__)
 

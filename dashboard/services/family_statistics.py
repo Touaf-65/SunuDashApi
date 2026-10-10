@@ -10,7 +10,6 @@ from .base import (
 from core.services.premium_service import current_summary, premium_series, sp_series, client_sp, sp_summary
 from . import indicators as ind
 import logging
-from .insured_statistics import fill_full_series_forward_fill
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +188,7 @@ class CountryFamilyStatisticsService:
             families_evolution = self.get_families_evolution()
             periods = self.periods
             # Forward fill
-            families_evolution_full = fill_full_series_forward_fill(periods, families_evolution)
+            families_evolution_full = families_evolution
             top_families_series, top_families_categories = self.get_top_families_consumption_series(15)
             
             actual_values = self._calculate_actual_values(families_evolution_full)
@@ -532,7 +531,7 @@ class ClientFamilyStatisticsService:
             families_evolution = self.get_families_evolution()
             periods = self.periods
             # Forward fill
-            families_evolution_full = fill_full_series_forward_fill(periods, families_evolution)
+            families_evolution_full = families_evolution
             top_families_series, top_families_categories = self.get_top_families_consumption_series(15)
 
             actual_values = self._calculate_actual_values(families_evolution_full)

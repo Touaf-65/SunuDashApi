@@ -128,11 +128,6 @@ def format_date_label(date, granularity):
     else:  # year
         return str(date.year)             # ex: "2025"
 
-# Fonction utilitaire pour compatibilité avec l'ancien code
-def date_label(date, granularity):
-    """Alias pour format_date_label pour compatibilité."""
-    return format_date_label(date, granularity)
-
 
 
 def sanitize_float(value):
@@ -309,34 +304,16 @@ def fill_full_series(periods, serie):
 
 
 def date_label(dt, granularity):
-    """
-    Generates a date label according to the granularity.
-    
-    Args:
-        dt: Date/datetime object
-        granularity (str): 'day', 'month', 'quarter', or 'year'
-        
-    Returns:
-        str: Formatted label
-    """
+    """Libellé d'une tranche pour les graphiques : 15/03 (jour), 03/2023 (mois), T1 2023 (trimestre), 2023 (année)."""
+    if not hasattr(dt, 'strftime'):
+        return str(dt)
     if granularity == 'day':
-        if hasattr(dt, 'strftime'):
-            return dt.strftime('%a')  # 'Mon', 'Tue', ...
-        return str(dt)
-    elif granularity == 'month':
-        if hasattr(dt, 'strftime'):
-            return dt.strftime('%Y-%m')
-        return str(dt)
-    elif granularity == 'year':
-        if hasattr(dt, 'strftime'):
-            return dt.strftime('%Y')
-        return str(dt)
-    elif granularity == 'quarter':
-        if hasattr(dt, 'year') and hasattr(dt, 'month'):
-            quarter = (dt.month - 1) // 3 + 1
-            return f"{dt.year}-Q{quarter}"
-        return str(dt)
-    return str(dt)
+        return dt.strftime('%d/%m')
+    if granularity == 'month':
+        return dt.strftime('%m/%Y')
+    if granularity == 'quarter':
+        return f"T{(dt.month - 1) // 3 + 1} {dt.year}"
+    return dt.strftime('%Y')
 
 
 def compute_evolution_rate(series):

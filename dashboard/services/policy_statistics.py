@@ -3,6 +3,8 @@ from django.core.exceptions import ValidationError
 from core.models import Client, Claim, InsuredEmployer, Policy, Insured, Partner, Act
 from countries.models import Country
 from .base import (
+    date_label,
+    sanitize_float,
     get_granularity, get_trunc_function, parse_date_range,
     generate_periods, fill_full_series, serie_to_pairs,
     compute_evolution_rate, format_series_for_multi_line_chart,
@@ -14,19 +16,6 @@ from . import indicators as ind
 import logging
 import json
 import math
-
-def sanitize_float(value):
-    """Sanitize float values to ensure JSON serialization compatibility."""
-    if isinstance(value, float):
-        if math.isnan(value) or math.isinf(value):
-            return 0.0  # Replace NaN/inf with 0
-        return round(value, 2)  # Round to 2 decimal places
-    elif isinstance(value, dict):
-        return {key: sanitize_float(val) for key, val in value.items()}
-    elif isinstance(value, list):
-        return [sanitize_float(val) for val in value]
-    else:
-        return value
 
 logger = logging.getLogger(__name__)
 
@@ -172,50 +161,10 @@ class ClientPolicyStatisticsService:
             raise
     
     def _get_nb_assures_par_type_series(self):
-        """
-        Gets insured by type series in the format expected by the view
-        
-        Returns:
-            list: Series data with name and data for each role type
-        """
-        try:
-            role_map = {
-                'primary': 'Assurés Principaux',
-                'spouse': 'Assurés conjoints',
-                'child': 'Assurés enfants',
-                'other': 'Autres assurés'
-            }
-            roles = ['primary', 'spouse', 'child', 'other']
-            nb_assures_par_type_series = []
-            
-            for role in roles:
-                data = []
-                for period in self.periods:
-                    if role == 'other':
-                        count = InsuredEmployer.objects.filter(
-                            policy_id=self.policy_id
-                        ).exclude(role__in=['primary','spouse','child'])\
-                         .filter(Q(start_date__lte=period) | Q(start_date__isnull=True))\
-                         .filter(Q(end_date__gt=period) | Q(end_date__isnull=True)).count()
-                    else:
-                        count = InsuredEmployer.objects.filter(
-                            policy_id=self.policy_id,
-                            role=role
-                        ).filter(Q(start_date__lte=period) | Q(start_date__isnull=True))\
-                         .filter(Q(end_date__gt=period) | Q(end_date__isnull=True)).count()
-                    
-                    date_label = self._get_date_label(period)
-                    data.append({"x": date_label, "y": count})
-                
-                nb_assures_par_type_series.append({
-                    "name": role_map[role],
-                    "data": data
-                })
-            
-            return nb_assures_par_type_series
-        except Exception as e:
-            logger.exception(f"Error in _get_nb_assures_par_type_series: {e}")
-            raise
+        """Assurés ayant consommé par tranche, selon leur rôle sur la police (lot D3)."""
+        by_role = ind.consumers_by_role_series(self.claims, self.trunc, self.periods)
+        labels = {'primary': 'Assurés principaux', 'spouse': 'Conjoints', 'child': 'Enfants'}
+        return format_series_for_multi_line_chart(by_role, self.periods, self.granularity, labels)
     
     def _get_top5_familles_conso_series(self):
         """
@@ -421,64 +370,8 @@ class ClientPolicyStatisticsService:
             raise
     
     def _get_date_label(self, dt):
-        """
-        Get date label based on granularity
-        
-        Args:
-            dt: datetime object
-        
-        Returns:
-            str: Formatted date label
-        """
-        if self.granularity == 'day':
-            return dt.strftime('%Y-%m-%d')
-        elif self.granularity == 'month':
-            return dt.strftime('%Y-%m')
-        elif self.granularity == 'year':
-            return dt.strftime('%Y')
-        elif self.granularity == 'quarter':
-            quarter = (dt.month - 1) // 3 + 1
-            return f"{dt.year}-Q{quarter}"
-        return str(dt)
-    
-    def _compute_evolution_rate(self, series):
-        """
-        Compute evolution rate for a series
-        
-        Args:
-            series: List of [timestamp, value] pairs
-        
-        Returns:
-            float or str: Evolution rate or "Nouveau"
-        """
-        if not series or len(series) == 0:
-            return 0.0
-        if len(series) == 1:
-            first = last = float(series[0][1] if isinstance(series[0], (list, tuple)) else series[0]['y'] or 0)
-        else:
-            first = float(series[0][1] if isinstance(series[0], (list, tuple)) else series[0]['y'] or 0)
-            last = float(series[-1][1] if isinstance(series[-1], (list, tuple)) else series[-1]['y'] or 0)
-        
-        if first == 0:
-            if last == 0:
-                return 0.0
-            else:
-                return "Nouveau"
-        return round(100 * (last - first) / abs(first), 2)
-    
-    def _get_actual_value(self, series):
-        """
-        Get actual (last) value from a series
-        
-        Args:
-            series: List of [timestamp, value] pairs
-        
-        Returns:
-            float: Last value in the series
-        """
-        if not series:
-            return 0
-        return float(series[-1][1] if isinstance(series[-1], (list, tuple)) else series[-1]['y'] or 0)
+        """Libellé de tranche commun aux graphiques (base.date_label)."""
+        return date_label(dt, self.granularity)
     
     def generate_statistics(self):
         """
@@ -756,25 +649,8 @@ class ClientPolicyListService:
             raise
     
     def _get_date_label(self, dt):
-        """
-        Generate date label based on granularity.
-        
-        Args:
-            dt (datetime): Date to format
-            
-        Returns:
-            str: Formatted date label
-        """
-        if self.granularity == 'day':
-            return dt.strftime('%Y-%m-%d')
-        elif self.granularity == 'month':
-            return dt.strftime('%Y-%m')
-        elif self.granularity == 'year':
-            return dt.strftime('%Y')
-        elif self.granularity == 'quarter':
-            quarter = (dt.month - 1) // 3 + 1
-            return f"{dt.year}-Q{quarter}"
-        return str(dt)
+        """Libellé de tranche commun aux graphiques (base.date_label)."""
+        return date_label(dt, self.granularity)
     
     def get_policies_statistics(self):
         """

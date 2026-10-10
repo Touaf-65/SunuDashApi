@@ -88,6 +88,7 @@ urlpatterns = [
     path('countries/<int:country_id>/policies/list/', CountryPolicyListView.as_view(), name='country-policy-list'),
     
     # Client Statistics
+    path('clients/<int:client_id>/statistics/', SpecificClientStatisticsDetailView.as_view(), name='client-statistics-detail'),
     path('clients/<int:client_id>/partners/statistics/', ClientPartnerStatisticsView.as_view(), name='client-partner-statistics'),
     path('clients/<int:client_id>/partners/list/', ClientPartnerListStatisticsView.as_view(), name='client-partner-list-statistics'),
     path('clients/<int:client_id>/families/statistics/', ClientFamilyStatisticsView.as_view(), name='client-family-statistics'),

@@ -13,23 +13,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def fill_full_series_forward_fill(periods, serie):
-    from .base import to_date
-    value_map = {to_date(point['period']): point['value'] for point in serie}
-    filled = []
-    last_value = 0
-    found_first = False
-    for period in periods:
-        period_date = to_date(period)
-        value = value_map.get(period_date, None)
-        if value is not None:
-            last_value = value
-            found_first = True
-        elif not found_first:
-            last_value = 0
-        filled.append({'period': period, 'value': last_value})
-    return filled
-
 class CountryInsuredStatisticsService:
     """
     Statistiques sur les assurés d'un pays sur une période (lot D3) : assurés **ayant consommé** (au moins un
