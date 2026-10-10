@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from .access import StatisticsAccess
+from core.models import Client
 from .services.country_statistics import CountryStatisticsService
 from .services.global_statistics import GlobalStatisticsService, CountriesListStatisticsService
 from .services.client_statistics import ClientStatisticsService, ClientStatisticListService, GlobalClientsListService, CountryClientStatisticsService, GlobalClientStatisticsService
@@ -1842,8 +1843,8 @@ class GlobalPolicyListView(APIView):
                     status=status.HTTP_403_FORBIDDEN
                 )
                  
-            date_start = request.data.get('date_start')
-            date_end = request.data.get('date_end')
+            date_start = request.query_params.get('date_start') or request.data.get('date_start')
+            date_end = request.query_params.get('date_end') or request.data.get('date_end')
 
             if not date_start or not date_end:
                 return Response(
@@ -1977,8 +1978,8 @@ class CountryPolicyListView(APIView):
                     status=status.HTTP_403_FORBIDDEN
                 )
             
-            date_start = request.data.get('date_start')
-            date_end = request.data.get('date_end')
+            date_start = request.query_params.get('date_start') or request.data.get('date_start')
+            date_end = request.query_params.get('date_end') or request.data.get('date_end')
 
             if not date_start or not date_end:
                 return Response(
@@ -2464,7 +2465,35 @@ class PolicyInsuredListView(APIView):
         except Exception as e:
             logger.error(f"Unexpected error in PolicyInsuredListView: {e}")
             return Response(
-                {"error": "Une erreur inattendue s'est produite."}, 
+                {"error": "Une erreur inattendue s'est produite."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class ClientSearchView(APIView):
+    """
+    Recherche d'employeurs par nom (lot D2), pour la fiche employeur.
+
+    GET /dashboard/countries/<country_id>/clients/search/?name=  -> employeurs du pays
+    GET /dashboard/global/clients/search/?name=                  -> tous les pays (admin global)
+    Au moins 2 caractères ; 20 résultats au plus, triés par nom.
+    """
+    permission_classes = [StatisticsAccess]
+    LIMIT = 20
+
+    def get(self, request, country_id=None):
+        name = (request.query_params.get('name') or '').strip()
+        if len(name) < 2:
+            return Response([], status=status.HTTP_200_OK)
+        clients = Client.objects.select_related('country').filter(name__icontains=name)
+        if country_id is not None:
+            clients = clients.filter(country_id=country_id)
+        return Response([
+            {'id': c.id, 'name': c.name, 'country_id': c.country_id, 'country_name': c.country.name}
+            for c in clients.order_by('name')[:self.LIMIT]
+        ], status=status.HTTP_200_OK)
+
+
+class GlobalClientSearchView(ClientSearchView):
+    global_only = True  # vue multi-pays : admin global uniquement
 

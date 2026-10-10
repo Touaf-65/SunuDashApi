@@ -412,4 +412,4 @@ Un ratio par période de prime ; prime inchangée sur des périodes consécutive
 | Import des sinistres (`importer`, `core`) | ✅ Lecture, rapprochement, rapport, écriture en base (I1-I3) ; tâche de fond, suivi, polices et taux, référentiel des actes, primes et S/P (I4) |
 | Familles d'assurés (`core`) | ✅ Consultation et corrections tracées (F1) ; plafonds non gérés |
 | Multi-devises | 📐 Conception arrêtée (devises par pays, taux datés saisis par les admins, devise choisie à l'import) — à développer |
-| Tableaux de bord et statistiques (`dashboard`) | 🔧 Adaptés au nouveau modèle des sinistres ; accès cloisonné par pays et par rôle (`dashboard/access.py`, D1) ; revue en cours (D2-D5) |
+| Tableaux de bord et statistiques (`dashboard`) | 🔧 Adaptés au nouveau modèle des sinistres ; accès cloisonné par pays et par rôle (`dashboard/access.py`, D1) ; recherche d'employeurs `countries/<id>/clients/search/?name=`, `global/clients/search/?name=` (D2) ; revue en cours (D3-D5) |

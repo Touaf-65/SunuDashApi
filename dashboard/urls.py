@@ -44,6 +44,10 @@ from .views import (
     
     # Partner Statistics
     PartnerStatisticsView,
+
+    # Recherche
+    ClientSearchView,
+    GlobalClientSearchView,
 )
 
 urlpatterns = [
@@ -51,6 +55,7 @@ urlpatterns = [
     path('global/statistics/', GlobalStatisticsDetailView.as_view(), name='global-statistics-detail'),
     path('global/countries/statistics/', GlobalCountriesListStatisticsView.as_view(), name='global-countries-list-statistics'),
     path('global/clients/statistics/', GlobalClientStatisticsDetailView.as_view(), name='global-client-statistics'),
+    path('global/clients/search/', GlobalClientSearchView.as_view(), name='global-client-search'),
     path('global/clients/list/', GlobalClientStatisticsListView.as_view(), name='global-client-list'),
     path('global/partners/statistics/', GlobalPartnerStatisticsView.as_view(), name='global-partner-statistics'),
     path('global/partners/list/', GlobalPartnerListStatisticsView.as_view(), name='global-partner-list-statistics'),
@@ -61,6 +66,7 @@ urlpatterns = [
     # Country Statistics
     path('countries/<int:country_id>/statistics/', CountryStatisticsDetailView.as_view(), name='country-statistics-detail'),
     path('countries/<int:country_id>/clients/statistics/', ClientStatisticsDetailView.as_view(), name='country-client-statistics'),
+    path('countries/<int:country_id>/clients/search/', ClientSearchView.as_view(), name='country-client-search'),
     path('countries/<int:country_id>/clients/list/', CountryClientStatisticsListView.as_view(), name='country-client-list'),
     path('countries/<int:country_id>/clients/<int:client_id>/statistics/', SpecificClientStatisticsDetailView.as_view(), name='country-client-statistics-detail'),
     path('countries/<int:country_id>/partners/statistics/', CountryPartnerStatisticsView.as_view(), name='country-partner-statistics'),
