@@ -206,10 +206,13 @@ def load_stat(path, filename=None, sheet=None):
     return prepare_stat(raw)
 
 
-def load_recaps(files):
-    """`files` : liste de (chemin, nom affiché). Les fichiers verrous d'Excel sont ignorés."""
+def load_recaps(files, on_file=None):
+    """`files` : liste de (chemin, nom affiché). Les fichiers verrous d'Excel sont ignorés.
+    `on_file(i, n)` : appelé après la lecture de chaque fichier (avancement)."""
     raws = []
-    for path, filename in files:
+    for i, (path, filename) in enumerate(files, 1):
+        if on_file:
+            on_file(i, len(files))
         filename = filename or os.path.basename(path)
         if is_lock_file(filename):
             continue

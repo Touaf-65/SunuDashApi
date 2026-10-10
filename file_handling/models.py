@@ -98,6 +98,12 @@ class ImportSession(models.Model):
     currency = models.CharField(max_length=3, blank=True, default='')
 
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    # Traitement en tâche de fond (lot I4) : étape en cours (ANALYSE ou IMPORT pendant PROCESSING), avancement
+    # en %, libellé, et heure du dernier signe de vie (un traitement muet trop longtemps est déclaré interrompu)
+    step = models.CharField(max_length=10, blank=True, default='')
+    progress = models.PositiveSmallIntegerField(default=0)
+    progress_label = models.CharField(max_length=255, blank=True, default='')
+    progress_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)

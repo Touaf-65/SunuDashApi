@@ -55,8 +55,11 @@ python manage.py runserver
 - Sans `DATABASE_URL`, l'API retombe sur le fichier SQLite `db.sqlite3`.
 - **Windows Defender** (« Accès contrôlé aux dossiers ») peut empêcher Python d'écrire dans `Documents` :
   autoriser `python.exe` (Python 3.11) dans la protection contre les ransomware, ou placer le projet hors de `Documents`.
-- Les tâches d'import utilisent **Celery** : en local, lancer un worker si nécessaire
-  (`celery -A sunu_dash worker -l info --pool=solo` sous Windows).
+- Le rapprochement et l'écriture des imports de sinistres tournent en **tâche de fond Celery** (lot I4) :
+  - `CELERY_TASK_ALWAYS_EAGER=True` (poste local) : exécution immédiate dans la requête, sans worker ;
+  - `False` (serveur) : lancer un worker, `celery -A sunu_dash worker -P solo -l info` sous Windows ;
+  - un traitement sans signe de vie depuis `IMPORT_STALE_MINUTES` (20) est déclaré interrompu : une écriture
+    interrompue n'a rien écrit et peut être relancée.
 
 ---
 
@@ -258,6 +261,14 @@ les tables métier, rapport Excel), puis, sur action de l'utilisateur, l'**écri
    - **Actes** : variantes ramenées au libellé retenu par la table `ActAlias` ; « Famille Acte » gardée comme
      libellé de garantie sur la ligne.
    - **Réimport** : sinistre déjà en base identique → ignoré ; différent → rejeté et listé (jamais écrasé).
+9. **Tâche de fond et suivi** (lot I4) : dépôt, rapprochement et import répondent **202** (session `PROCESSING`,
+   étape `ANALYSE` ou `IMPORT`) ; l'interface suit `GET /import-sessions/<id>/` (`progress` en %, `progress_label`).
+   Si la tâche s'est exécutée sur place, la réponse donne directement le résultat (200 / 422 / 500). File injoignable
+   → 503, session remise dans un état stable. Suppression refusée (409) pendant un traitement.
+10. **Polices et taux** (`/settings/`) : taux de couverture de la police et de chaque plan, saisi par l'**admin
+   territorial** (le chef de département technique consulte), pré-rempli par le **taux observé enregistré au dernier
+   import** ; « revenir au taux observé » ; souscripteur existant ou nouveau (entreprise / particulier, relié à
+   l'assuré principal de même nom). Chaque modification est tracée (`ReferenceChange`).
 
 Pour essayer sur des fichiers locaux, sans passer par l'interface :
 
@@ -344,6 +355,13 @@ Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
 | GET | `/import-sessions/`, `/import-sessions/<id>/download/?type=log` ou `?type=error` | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
 | DELETE | `/import-sessions/<id>/delete/` | Voir les règles de suppression |
 
+### Suivi des imports et paramétrage des polices
+| Méthode | Route | Accès |
+|---|---|---|
+| GET | `/import-sessions/<id>/` (état, avancement ; traitement muet trop longtemps → déclaré interrompu) | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
+| GET | `/settings/policies/?search=&to_complete=1`, `/settings/policies/<id>/` (plans, historique), `/settings/subscribers/?search=` | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
+| PATCH | `/settings/policies/<id>/` `{"coverage_rate": 80, "reset_rate", "plans": [{"id", "coverage_rate" \| "reset"}], "subscriber_id" \| "subscriber": {"kind", "name"}}` | ADMIN_TERRITORIAL du pays |
+
 ### Familles — `/families/` (ADMIN_TERRITORIAL, CHEF_DEPT_TECH, familles de leur pays)
 | Méthode | Route |
 |---|---|
@@ -377,7 +395,7 @@ Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
 | Comptes, authentification, rôles | ✅ Revu et testé (tests de bout en bout par HTTP réel) |
 | Pays (y compris désactivation au quorum et gel) | ✅ Revu et testé |
 | Sécurité des fichiers importés (`file_handling`) | ✅ Revue et testée |
-| Import des sinistres (`importer`, `core`) | ✅ Lecture, rapprochement, rapport et écriture en base (I1-I3) ; suivi en tâche de fond à venir (I4) |
+| Import des sinistres (`importer`, `core`) | ✅ Lecture, rapprochement, rapport, écriture en base (I1-I3) ; tâche de fond, suivi, polices et taux (I4) ; alias d'actes et primes à venir |
 | Familles d'assurés (`core`) | ✅ Consultation et corrections tracées (F1) ; plafonds non gérés |
 | Multi-devises | 📐 Conception arrêtée (devises par pays, taux datés saisis par les admins, devise choisie à l'import) — à développer |
 | Tableaux de bord et statistiques (`dashboard`) | 🔧 Adaptés au nouveau modèle des sinistres (toutes les routes vérifiées après un import réel) ; revue complète à venir |

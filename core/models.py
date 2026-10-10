@@ -92,6 +92,8 @@ class Policy(models.Model):
     # Taux de couverture par défaut (0,80 = 80 %) ; un plan de garanties peut le remplacer
     coverage_rate = models.DecimalField(max_digits=5, decimal_places=4, null=True, blank=True)
     coverage_rate_source = models.CharField(max_length=10, choices=RateSource.choices, blank=True, default='')
+    # Taux observé au dernier import (remboursé / réclamé le plus fréquent), proposé à l'admin territorial
+    observed_rate = models.DecimalField(max_digits=5, decimal_places=4, null=True, blank=True)
     creation_date = models.DateTimeField(auto_now_add=True)
     import_session = models.ForeignKey(ImportSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='imported_policies')
 
@@ -116,6 +118,7 @@ class GuaranteePlan(models.Model):
     label_key = models.CharField(max_length=255)
     coverage_rate = models.DecimalField(max_digits=5, decimal_places=4, null=True, blank=True)
     coverage_rate_source = models.CharField(max_length=10, choices=RateSource.choices, blank=True, default='')
+    observed_rate = models.DecimalField(max_digits=5, decimal_places=4, null=True, blank=True)
     import_session = models.ForeignKey(ImportSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='imported_plans')
 
     class Meta:
@@ -379,6 +382,28 @@ class ClaimLine(models.Model):
 
     def __str__(self):
         return f'{self.claim.number} #{self.line_number}'
+
+
+class ReferenceChange(models.Model):
+    """Modification d'un référentiel par l'admin territorial (lot I4) : taux de couverture, souscripteur d'une police,
+    alias d'actes… Qui, quand, quoi."""
+    country = models.ForeignKey(Country, on_delete=models.CASCADE, null=True, blank=True, related_name='reference_changes')
+    object_type = models.CharField(max_length=20)       # POLICY, PLAN, ALIAS…
+    object_id = models.PositiveIntegerField(null=True, blank=True)
+    label = models.CharField(max_length=255, blank=True, default='')
+    summary = models.TextField()
+    details = models.JSONField(default=dict, blank=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                             related_name='reference_changes')
+    user_name = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        indexes = [models.Index(fields=['object_type', 'object_id'], name='refchange_object_idx')]
+
+    def __str__(self):
+        return self.summary
 
 
 class FamilyChange(models.Model):

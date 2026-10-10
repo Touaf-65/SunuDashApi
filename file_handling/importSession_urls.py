@@ -1,9 +1,12 @@
 from django.urls import path
 from  .views import ImportSessionListView, ImportSessionDownloadView, ImportSessionDeleteView
-from importer.views import ImportSessionSheetsView, ImportSessionAnalyseView, ImportSessionImportView
+from importer.views import (
+    ImportSessionSheetsView, ImportSessionAnalyseView, ImportSessionImportView, ImportSessionDetailView,
+)
 
 urlpatterns = [
     path('', ImportSessionListView.as_view(), name='import-session-list'),
+    path('<int:pk>/', ImportSessionDetailView.as_view(), name='import-session-detail'),
     path('<int:pk>/delete/', ImportSessionDeleteView.as_view(), name='import-session-delete'),
     path('<int:pk>/download/', ImportSessionDownloadView.as_view(), name='import-session-download'),
     # Rapprochement (lots I1-I2) : feuilles du fichier statistique, rapprochement sur une feuille

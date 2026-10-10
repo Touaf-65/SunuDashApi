@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 from core.models import Claim
-from .models import File
+from .models import File, ImportSession
 from .serializers import FileSerializer, ImportSessionSerializer
 from .access import (
     CanAccessCountryFiles, files_for, sessions_for, session_of_file, session_files, can_delete,
@@ -31,6 +31,15 @@ def _open_stored(field_file):
 
 
 INVALID_PASSWORD_MESSAGE = "Mot de passe incorrect : rien n'a été supprimé."
+PROCESSING_MESSAGE = "Un traitement est en cours sur cet import : attendez sa fin avant de le supprimer."
+
+
+def _busy(session):
+    """Réponse 409 si la session est en cours de traitement (un traitement interrompu ne bloque plus)."""
+    from importer.services.analysis_service import mark_stale
+    if session is not None and session.status == ImportSession.Status.PROCESSING and not mark_stale(session):
+        return Response({"error": PROCESSING_MESSAGE, "code": "processing"}, status=status.HTTP_409_CONFLICT)
+    return None
 
 
 def _wants_claims_deleted(request):
@@ -97,6 +106,9 @@ class FileDeleteView(APIView):
             return Response({"error": DELETE_FORBIDDEN_MESSAGE}, status=status.HTTP_403_FORBIDDEN)
 
         if session:
+            busy = _busy(session)
+            if busy:
+                return busy
             delete_claims, error = _check_deletion(request)
             if error:
                 return error
@@ -147,11 +159,14 @@ class ImportSessionListView(APIView):
     permission_classes = FILE_PERMISSIONS
 
     def get(self, request):
-        import_sessions = (
+        import_sessions = list(
             sessions_for(request.user)
             .select_related('user', 'country', 'stat_file', 'recap_file')
             .order_by("-created_at")
         )
+        from importer.services.analysis_service import mark_stale
+        for session in import_sessions:
+            mark_stale(session)
         serializer = ImportSessionSerializer(import_sessions, many=True, context={'request': request})
         return Response(serializer.data)
 
@@ -163,6 +178,9 @@ class ImportSessionDeleteView(APIView):
         session = get_object_or_404(sessions_for(request.user).select_related('stat_file', 'recap_file', 'user'), pk=pk)
         if not can_delete(request.user, session):
             return Response({"error": DELETE_FORBIDDEN_MESSAGE}, status=status.HTTP_403_FORBIDDEN)
+        busy = _busy(session)
+        if busy:
+            return busy
         delete_claims, error = _check_deletion(request)
         if error:
             return error

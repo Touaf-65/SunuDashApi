@@ -463,20 +463,24 @@ class ClaimWriter:
 
             rate = self._observed_rate(P)
             note['Taux observé'] = float(rate) if rate is not None else None
+            if rate is not None:
+                policy.observed_rate = rate
             if rate is not None and policy.coverage_rate_source != RateSource.MANUAL:
                 policy.coverage_rate, policy.coverage_rate_source = rate, RateSource.OBSERVED
             note['Taux enregistré'] = float(policy.coverage_rate) if policy.coverage_rate is not None else None
             if policy.coverage_rate_source == RateSource.MANUAL and rate is not None and rate != policy.coverage_rate:
                 note['Remarque'] = (note['Remarque'] + ' Taux saisi différent du taux observé.').strip()
-            policy.save(update_fields=['subscriber', 'coverage_rate', 'coverage_rate_source'])
+            policy.save(update_fields=['subscriber', 'coverage_rate', 'coverage_rate_source', 'observed_rate'])
             self.out.policy_notes.append(note)
 
             for plan_key, PP in P[P['plan_key'] != ''].groupby('plan_key'):
                 plan = self.plans[(pkey, plan_key)]
                 rate = self._observed_rate(PP)
-                if rate is not None and plan.coverage_rate_source != RateSource.MANUAL:
-                    plan.coverage_rate, plan.coverage_rate_source = rate, RateSource.OBSERVED
-                    plan.save(update_fields=['coverage_rate', 'coverage_rate_source'])
+                if rate is not None:
+                    plan.observed_rate = rate
+                    if plan.coverage_rate_source != RateSource.MANUAL:
+                        plan.coverage_rate, plan.coverage_rate_source = rate, RateSource.OBSERVED
+                    plan.save(update_fields=['coverage_rate', 'coverage_rate_source', 'observed_rate'])
                 self.out.policy_notes.append({
                     'Police': policy.policy_number, 'Plan': plan.label, 'Souscripteur': '',
                     'Taux observé': float(rate) if rate is not None else None,

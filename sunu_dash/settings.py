@@ -205,6 +205,12 @@ SIMPLE_JWT = {
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
+# Rapprochement et écriture des imports en tâche de fond (lot I4). True : exécution immédiate dans la requête,
+# sans worker (poste local) ; False : un worker doit tourner (`celery -A sunu_dash worker -P solo -l info` sous Windows)
+CELERY_TASK_ALWAYS_EAGER = os.environ.get('CELERY_TASK_ALWAYS_EAGER', 'False').lower() in ('1', 'true', 'yes')
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+# Un traitement d'import sans signe de vie depuis ce délai est déclaré interrompu
+IMPORT_STALE_MINUTES = int(os.environ.get('IMPORT_STALE_MINUTES', '20'))
 
 # Logging configuration
 LOGGING = {

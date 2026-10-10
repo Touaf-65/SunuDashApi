@@ -27,12 +27,23 @@ def _session_payload(session, request, **extra):
     return data
 
 
+def _queued(session, request):
+    """Traitement confié au worker (lot I4) : 202, l'interface suit GET /import-sessions/<id>/."""
+    return Response(_session_payload(session, request, detail=session.progress_label),
+                    status=status.HTTP_202_ACCEPTED)
+
+
 def _analyse_response(session, request):
-    """Réponse après rapprochement : 200 si le rapport est produit, 422 si l'analyse s'est arrêtée
-    (mauvais fichier, colonne absente, aucune période commune…), avec le motif dans `detail`."""
+    """Réponse après le lancement du rapprochement : 202 s'il tourne en tâche de fond ; s'il est déjà terminé
+    (exécution sur place) : 200 si le rapport est produit, 422 si l'analyse s'est arrêtée (mauvais fichier,
+    colonne absente, aucune période commune…), avec le motif dans `detail` ; 503 si la file est injoignable."""
+    if session.status == ImportSession.Status.PROCESSING:
+        return _queued(session, request)
     payload = _session_payload(session, request, detail=session.message)
     if session.status == ImportSession.Status.ANALYSED:
         return Response(payload, status=status.HTTP_200_OK)
+    if session.message == analysis_service.QUEUE_UNAVAILABLE:
+        return Response(payload, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     return Response(payload, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
 
@@ -112,7 +123,7 @@ class FileUploadAndImportView(APIView):
             return Response(_session_payload(session, request, detail=session.message, sheets=sheets),
                             status=status.HTTP_200_OK)
 
-        analysis_service.analyse(session, sheet or (sheets[0] if sheets else None))
+        session = analysis_service.queue_analyse(session, sheet or (sheets[0] if sheets else None))
         return _analyse_response(session, request)
 
 
@@ -156,7 +167,7 @@ class ImportSessionAnalyseView(APIView):
             return Response({'detail': 'Choisissez la feuille du fichier statistique à rapprocher.', 'sheets': sheets},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        analysis_service.analyse(session, sheet or (sheets[0] if sheets else None))
+        session = analysis_service.queue_analyse(session, sheet or (sheets[0] if sheets else None))
         return _analyse_response(session, request)
 
 
@@ -174,9 +185,29 @@ class ImportSessionImportView(APIView):
         if session.status != ImportSession.Status.ANALYSED:
             return Response({'detail': "Seule une session rapprochée (et pas encore importée) peut être écrite en base."},
                             status=status.HTTP_409_CONFLICT)
-        written = analysis_service.import_claims(session)
+        session = analysis_service.queue_import(session)
+        if session.status == ImportSession.Status.PROCESSING:
+            return _queued(session, request)
+        # Exécution sur place : DONE (200), échec -> session restée ANALYSED avec le motif (500, ou 503 si la file
+        # de traitement est injoignable)
         payload = _session_payload(session, request, detail=session.message)
-        return Response(payload, status=status.HTTP_200_OK if written else status.HTTP_500_INTERNAL_SERVER_ERROR)
+        if session.status == ImportSession.Status.DONE:
+            return Response(payload, status=status.HTTP_200_OK)
+        if session.message == analysis_service.QUEUE_UNAVAILABLE:
+            return Response(payload, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ImportSessionDetailView(APIView):
+    """Session d'import (suivi d'un traitement en cours). Un traitement muet depuis trop longtemps est déclaré
+    interrompu au passage."""
+    permission_classes = [IsAuthenticated, CanAccessCountryFiles]
+
+    def get(self, request, pk):
+        session = get_object_or_404(sessions_for(request.user).select_related('user', 'country', 'stat_file',
+                                                                              'recap_file'), pk=pk)
+        analysis_service.mark_stale(session)
+        return Response(ImportSessionSerializer(session, context={'request': request}).data)
 
 
 import os
