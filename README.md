@@ -362,6 +362,20 @@ Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
 | GET | `/settings/policies/?search=&to_complete=1`, `/settings/policies/<id>/` (plans, historique), `/settings/subscribers/?search=` | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
 | PATCH | `/settings/policies/<id>/` `{"coverage_rate": 80, "reset_rate", "plans": [{"id", "coverage_rate" \| "reset"}], "subscriber_id" \| "subscriber": {"kind", "name"}}` | ADMIN_TERRITORIAL du pays |
 
+### Primes et référentiel des actes
+| Méthode | Route | Accès |
+|---|---|---|
+| GET / POST | `/settings/premiums/` (employeurs et historique des primes ; nouvelle prime `{"client_id", "amount", "start_date", "end_date", "note"}`) | ADMIN_TERRITORIAL, CHEF_DEPT_TECH du pays |
+| PATCH / DELETE | `/settings/premiums/<id>/` ; GET `/settings/premiums/history/<employeur>/` | idem |
+| POST | `/settings/premiums/import/` (multipart `file`, `dry_run=true` pour contrôler) ; GET `/settings/premiums/template/` | idem |
+| GET | `/settings/premiums/sp/?start=&end=&client=` (S/P par période de prime, ensemble si prime inchangée, total) | idem |
+| GET | `/referential/categories/`, `/referential/acts/?search=&category=&unused=1&page=`, `/referential/acts/<id>/` | ADMIN_GLOBAL, ADMIN_TERRITORIAL, CHEF_DEPT_TECH |
+| PATCH / POST / DELETE | `/referential/acts/<id>/` `{"label", "category_id"}` ; `/referential/acts/merge/` `{"keep_id", "absorb_ids"}` ; `/referential/acts/<id>/aliases/` `{"label"}` ; `/referential/aliases/<id>/` | ADMIN_GLOBAL |
+
+**Ratio S/P** (`core/services/premium_service.py`) : S = consommation (remboursé) ; P = prime **entière** en vigueur.
+Un ratio par période de prime ; prime inchangée sur des périodes consécutives → aussi un ratio d'ensemble
+(somme des S / la prime) ; agrégats : S couverts / primes (une suite de même montant compte une fois).
+
 ### Familles — `/families/` (ADMIN_TERRITORIAL, CHEF_DEPT_TECH, familles de leur pays)
 | Méthode | Route |
 |---|---|
@@ -395,7 +409,7 @@ Aucun mot de passe n'est jamais écrit sur disque ni journalisé.
 | Comptes, authentification, rôles | ✅ Revu et testé (tests de bout en bout par HTTP réel) |
 | Pays (y compris désactivation au quorum et gel) | ✅ Revu et testé |
 | Sécurité des fichiers importés (`file_handling`) | ✅ Revue et testée |
-| Import des sinistres (`importer`, `core`) | ✅ Lecture, rapprochement, rapport, écriture en base (I1-I3) ; tâche de fond, suivi, polices et taux (I4) ; alias d'actes et primes à venir |
+| Import des sinistres (`importer`, `core`) | ✅ Lecture, rapprochement, rapport, écriture en base (I1-I3) ; tâche de fond, suivi, polices et taux, référentiel des actes, primes et S/P (I4) |
 | Familles d'assurés (`core`) | ✅ Consultation et corrections tracées (F1) ; plafonds non gérés |
 | Multi-devises | 📐 Conception arrêtée (devises par pays, taux datés saisis par les admins, devise choisie à l'import) — à développer |
 | Tableaux de bord et statistiques (`dashboard`) | 🔧 Adaptés au nouveau modèle des sinistres (toutes les routes vérifiées après un import réel) ; revue complète à venir |

@@ -7,6 +7,7 @@ from .base import (
     generate_periods, serie_to_pairs, format_series_for_multi_line_chart,
     format_top_clients_series, format_top_insureds_series, sanitize_float
 )
+from core.services.premium_service import current_summary, premium_series, sp_series, client_sp, sp_summary
 import logging
 from .insured_statistics import fill_full_series_forward_fill
 
@@ -298,8 +299,9 @@ class CountryFamilyListService:
                 
                 # Calculer le ratio S/P (Sinistres/Primes)
                 sp_ratio = 0
-                if client.prime and client.prime > 0:
-                    sp_ratio = (family_consumption['total_reimbursed'] or 0) / float(client.prime)
+                premium = sp_summary([client.id], self.date_start, self.date_end, Claim.objects.none())['premium']
+                if premium:
+                    sp_ratio = (family_consumption['total_reimbursed'] or 0) / premium
                 
                 # Détails des membres de la famille
                 family_members_details = []
@@ -660,8 +662,9 @@ class ClientFamilyListService:
 
                 # Calculer le ratio S/P (Sinistres/Primes)
                 sp_ratio = 0
-                if self.client.prime and self.client.prime > 0:
-                    sp_ratio = (family_consumption['total_reimbursed'] or 0) / float(self.client.prime)
+                premium = sp_summary([self.client.id], self.date_start, self.date_end, Claim.objects.none())['premium']
+                if premium:
+                    sp_ratio = (family_consumption['total_reimbursed'] or 0) / premium
 
                 # Détails des membres de la famille
                 family_members_details = []

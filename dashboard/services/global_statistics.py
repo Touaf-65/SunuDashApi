@@ -8,6 +8,7 @@ from .base import (
     compute_evolution_rate, format_series_for_multi_line_chart,
     format_top_clients_series, format_countries_consumption_series
 )
+from core.services.premium_service import current_summary, premium_series, sp_series, client_sp, sp_summary
 import logging
 
 logger = logging.getLogger(__name__)
@@ -80,22 +81,11 @@ class GlobalStatisticsService:
     
     def get_prime_timeseries(self):
         """
-        Calculates the evolution of the total premium.
-        
-        Returns:
-            list: Time series of premiums
+        Primes en vigueur par tranche de temps (primes entières des employeurs ; historique Premium).
         """
         try:
-            result = list(
-                self.clients.filter(creation_date__range=(self.date_start, self.date_end))
-                .annotate(period=self.trunc('creation_date'))
-                .values('period')
-                .annotate(value=Sum('prime'))
-                .order_by('period')
-            )
-            for point in result:
-                point['value'] = float(point['value'] or 0)
-            return result
+            periods = generate_periods(self.date_start, self.date_end, self.granularity)
+            return premium_series(self.client_ids, periods, self.date_end)
         except Exception as e:
             logger.error(f"Error in get_prime_timeseries: {e}")
             return []
@@ -363,11 +353,12 @@ class GlobalStatisticsService:
         countries_consumption_series = self.get_countries_consumption_multiline_series()
 
         
-        # Calculating the S/P ratio
-        sp_ratio_series = self.get_sp_ratio_timeseries(primes_series, reimbursed_series)
-        
         # Generating complete periods
         periods = generate_periods(self.date_start, self.date_end, self.granularity)
+
+        # Ratio S/P par tranche : consommation de la tranche / primes entières en vigueur (premium_service)
+        sp_ratio_series = sp_series(self.client_ids, periods, self.date_end, self.claims)
+        sp_total = sp_summary(self.client_ids, self.date_start, self.date_end, self.claims)
         
         # Filling series with all periods
         clients_series_full = fill_full_series(periods, clients_series)
@@ -428,6 +419,8 @@ class GlobalStatisticsService:
             "montant_reclame_series": claimed_series_pairs,
             "partners_series": partners_series_pairs,
             "sp_ratio_series": sp_ratio_series_pairs,
+            # S/P de la période : consommation couverte / primes entières en vigueur
+            "sp_ratio_total": sp_total,
             "nb_assures_principaux_series": primary_insured_series,
             "nb_assures_total_series": total_insured_series_pairs,
             "nb_assures_par_type_series": insured_by_role_series,
@@ -517,28 +510,28 @@ class CountriesListStatisticsService:
         countries = Country.objects.all()
         results = []
         for country in countries:
-            clients = Client.objects.filter(country=country)
-            if self.date_start and self.date_end:
-                clients = clients.filter(creation_date__range=(self.date_start, self.date_end))
-            nb_clients = clients.count()
-            prime_globale = clients.aggregate(total=Sum('prime'))['total'] or 0
-
-            client_ids = clients.values_list('id', flat=True)
-
-            # Nombre d'assurés du pays (distincts)
-            insured_qs = InsuredEmployer.objects.filter(employer_id__in=client_ids)
-            if self.date_start and self.date_end:
-                insured_qs = insured_qs.filter(insured__creation_date__range=(self.date_start, self.date_end))
-            nb_assures = insured_qs.values('insured_id').distinct().count()
-
-            # Consommation globale : somme des montants remboursés des claims dont la policy appartient à un client du pays
-            claims_qs = Claim.objects.filter(employer_id__in=client_ids)
+            # Activité de la période : sinistres réglés sur la période (la date de création en base n'est que la date
+            # de l'import, elle ne dit rien de l'activité)
+            all_ids = list(Client.objects.filter(country=country).values_list('id', flat=True))
+            claims_qs = Claim.objects.filter(country=country)
             if self.date_start and self.date_end:
                 claims_qs = claims_qs.filter(settlement_date__range=(self.date_start, self.date_end))
+                nb_clients = claims_qs.exclude(employer=None).values('employer').distinct().count()
+                nb_assures = claims_qs.values('insured').distinct().count()
+            else:
+                nb_clients = len(all_ids)
+                nb_assures = InsuredEmployer.objects.filter(policy__country=country).values('insured').distinct().count()
+
+            # Consommation globale : montants remboursés des sinistres du pays sur la période
             consommation_globale = claims_qs.aggregate(total=Sum('reimbursed_amount'))['total'] or 0
 
-            # Ratio S/P
-            ratio_sp = float(prime_globale) / float(consommation_globale) if consommation_globale else None
+            # Primes (historique Premium) et ratio S/P = consommation / prime entière en vigueur
+            if self.date_start and self.date_end:
+                sp = sp_summary(all_ids, self.date_start, self.date_end, claims_qs)
+            else:
+                sp = current_summary(all_ids, Claim.objects.filter(country=country))
+            prime_globale = sp['premium']
+            ratio_sp = sp['ratio']
 
             results.append({
                 'country_id': country.id,

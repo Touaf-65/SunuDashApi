@@ -7,6 +7,7 @@ from .base import (
     generate_periods, serie_to_pairs, format_series_for_multi_line_chart,
     format_top_clients_series, format_top_insureds_series, sanitize_float
 )
+from core.services.premium_service import current_summary, premium_series, sp_series, client_sp, sp_summary
 import logging
 
 logger = logging.getLogger(__name__)
@@ -592,9 +593,10 @@ class PolicyInsuredStatisticsService:
             # Calculer le ratio S/P global
             sp_ratio = 0
             if total_consumption > 0:
-                # Prime encore portée par l'employeur (décision L : à passer sur la police) ; absente -> 0
-                prime = self.policy.client.prime if self.policy.client else None
-                sp_ratio = round((float(prime) / total_consumption) * 100, 2) if prime is not None else 0
+                # Prime entière en vigueur des employeurs de la police (historique Premium) ; absente -> 0
+                employer_ids = list(self.policy.employers.values_list('id', flat=True))
+                prime = sp_summary(employer_ids, self.date_start, self.date_end, Claim.objects.none())['premium']
+                sp_ratio = round((total_consumption / prime) * 100, 2) if prime else 0
             
             # Formater les séries temporelles pour les graphiques
             role_labels = {
@@ -671,9 +673,10 @@ class PolicyInsuredStatisticsService:
             # Calculer le ratio S/P global
             sp_ratio = 0
             if total_consumption > 0:
-                # Prime encore portée par l'employeur (décision L : à passer sur la police) ; absente -> 0
-                prime = self.policy.client.prime if self.policy.client else None
-                sp_ratio = round((float(prime) / total_consumption) * 100, 2) if prime is not None else 0
+                # Prime entière en vigueur des employeurs de la police (historique Premium) ; absente -> 0
+                employer_ids = list(self.policy.employers.values_list('id', flat=True))
+                prime = sp_summary(employer_ids, self.date_start, self.date_end, Claim.objects.none())['premium']
+                sp_ratio = round((total_consumption / prime) * 100, 2) if prime else 0
             
             # Formater les séries temporelles pour les graphiques
             role_labels = {

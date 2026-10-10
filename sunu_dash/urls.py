@@ -11,6 +11,7 @@ urlpatterns = [
     path("dashboard/", include("dashboard.urls")),
     path("families/", include("core.family_urls")),
     path("settings/", include("core.settings_urls")),
+    path("referential/", include("core.referential_urls")),
 ]
 
 # MEDIA_ROOT (fichiers importés, journaux, rapports) n'est volontairement PAS servi par une route /media/ :

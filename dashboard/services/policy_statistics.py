@@ -9,6 +9,7 @@ from .base import (
     format_top_clients_series, to_date, get_granularity_with_points,
     format_date_label
 )
+from core.services.premium_service import current_summary, premium_series, sp_series, client_sp, sp_summary
 import logging
 import json
 import math
@@ -1716,8 +1717,8 @@ class GlobalPolicyStatisticsService:
             float: Total premium amount
         """
         try:
-            total = self.clients.aggregate(total=Sum('prime'))['total']
-            return float(total or 0)
+            # Primes en vigueur aujourd'hui (Premium, historisées par période)
+            return current_summary(self.clients.values_list('id', flat=True), self.claims)['premium']
         except Exception as e:
             logger.error(f"Error getting total premium amount: {e}")
             return 0.0
@@ -1744,12 +1745,9 @@ class GlobalPolicyStatisticsService:
             float: S/P ratio as percentage
         """
         try:
-            total_premium = self.get_total_premium_amount()
-            if total_premium == 0:
-                return 0.0
-            
-            total_claimed = self.get_total_claimed_amount()
-            return round((total_claimed / total_premium) * 100, 2)
+            # Primes en vigueur aujourd'hui et consommation (remboursé) depuis leur début (core/services/premium_service)
+            ratio = current_summary(self.clients.values_list('id', flat=True), self.claims)['ratio']
+            return round(ratio * 100, 2) if ratio is not None else 0.0
         except Exception as e:
             logger.error(f"Error calculating S/P ratio: {e}")
             return 0.0
@@ -1858,8 +1856,8 @@ class CountryPolicyStatisticsService:
             float: Total premium amount
         """
         try:
-            total = self.clients.aggregate(total=Sum('prime'))['total']
-            return float(total or 0)
+            # Primes en vigueur aujourd'hui (Premium, historisées par période)
+            return current_summary(self.clients.values_list('id', flat=True), self.claims)['premium']
         except Exception as e:
             logger.error(f"Error getting total premium amount: {e}")
             return 0.0
@@ -1886,12 +1884,9 @@ class CountryPolicyStatisticsService:
             float: S/P ratio as percentage
         """
         try:
-            total_premium = self.get_total_premium_amount()
-            if total_premium == 0:
-                return 0.0
-            
-            total_claimed = self.get_total_claimed_amount()
-            return round((total_claimed / total_premium) * 100, 2)
+            # Primes en vigueur aujourd'hui et consommation (remboursé) depuis leur début (core/services/premium_service)
+            ratio = current_summary(self.clients.values_list('id', flat=True), self.claims)['ratio']
+            return round(ratio * 100, 2) if ratio is not None else 0.0
         except Exception as e:
             logger.error(f"Error calculating S/P ratio: {e}")
             return 0.0

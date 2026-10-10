@@ -7,6 +7,7 @@ from .base import (
     compute_evolution_rate, format_series_for_multi_line_chart,
     format_top_clients_series, to_date
 )
+from core.services.premium_service import current_summary, premium_series, sp_series, client_sp, sp_summary
 import logging
 
 logger = logging.getLogger(__name__)
@@ -90,22 +91,11 @@ class CountryStatisticsService:
     
     def get_prime_timeseries(self):
         """
-        Calculates the evolution of the total premium.
-        
-        Returns:
-            list: Time series of premiums
+        Primes en vigueur par tranche de temps (primes entières des employeurs ; historique Premium).
         """
         try:
-            result = list(
-                self.clients.filter(creation_date__range=(self.date_start, self.date_end))
-                .annotate(period=self.trunc('creation_date'))
-                .values('period')
-                .annotate(value=Sum('prime'))
-                .order_by('period')
-            )
-            for point in result:
-                point['value'] = float(point['value'] or 0)
-            return result
+            periods = generate_periods(self.date_start, self.date_end, self.granularity)
+            return premium_series(self.client_ids, periods, self.date_end)
         except Exception as e:
             logger.error(f"Error in get_prime_timeseries: {e}")
             return []
@@ -335,11 +325,12 @@ class CountryStatisticsService:
         insured_by_role = self.get_insured_by_role_timeseries()
         top_clients_series = self.get_top_clients_consumption()
         
-        # Calculating the S/P ratio
-        sp_ratio_series = self.get_sp_ratio_timeseries(primes_series, reimbursed_series)
-        
         # Generating complete periods
         periods = generate_periods(self.date_start, self.date_end, self.granularity)
+
+        # Ratio S/P par tranche : consommation de la tranche / primes entières en vigueur (premium_service)
+        sp_ratio_series = sp_series(self.client_ids, periods, self.date_end, self.claims)
+        sp_total = sp_summary(self.client_ids, self.date_start, self.date_end, self.claims)
         
         # Filling series with all periods
         clients_series_full = fill_full_series(periods, clients_series)
@@ -394,6 +385,8 @@ class CountryStatisticsService:
             "montant_reclame_series": claimed_series_pairs,
             "partners_series": partners_series_pairs,
             "sp_ratio_series": sp_ratio_series_pairs,
+            # S/P de la période : consommation couverte / primes entières en vigueur
+            "sp_ratio_total": sp_total,
             "nb_assures_principaux_series": primary_insured_series,
             "nb_assures_total_series": total_insured_series_pairs,
             "nb_assures_par_type_series": insured_by_role_series,

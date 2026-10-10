@@ -12,7 +12,7 @@ Modèle métier des sinistres (lot I3, décisions des 08 et 09/10/2026, voir JOU
 """
 from django.conf import settings
 from django.db import models
-from django.db.models import Q
+from django.db.models import F, Q
 
 from countries.models import Country
 from file_handling.models import File, ImportSession
@@ -382,6 +382,44 @@ class ClaimLine(models.Model):
 
     def __str__(self):
         return f'{self.claim.number} #{self.line_number}'
+
+
+class Premium(models.Model):
+    """Prime d'un employeur pour une période couverte (lot I4, décisions du 10/10/2026).
+
+    La prime ne figure pas dans les fichiers de sinistres : elle est saisie ou importée (Excel / CSV) par l'admin
+    territorial ou le chef de département technique. Une prime par période, sans chevauchement : l'historique
+    (2 M en 2025, 3 M en 2026…) sert au ratio S/P, calculé avec la prime **entière** en vigueur sur la période
+    analysée (voir core/services/premium_service.py)."""
+    class Source(models.TextChoices):
+        MANUAL = 'MANUAL', 'Saisie'
+        IMPORT = 'IMPORT', 'Import de fichier'
+
+    country = models.ForeignKey(Country, on_delete=models.CASCADE, related_name='premiums')
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='premiums')
+    amount = models.DecimalField(max_digits=16, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    source = models.CharField(max_length=10, choices=Source.choices, default=Source.MANUAL)
+    file_name = models.CharField(max_length=255, blank=True, default='')
+    note = models.CharField(max_length=500, blank=True, default='')
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name='premiums_created')
+    created_by_name = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['client_id', 'start_date']
+        constraints = [
+            models.CheckConstraint(check=Q(end_date__gte=F('start_date')), name='premium_period_valid'),
+            models.CheckConstraint(check=Q(amount__gt=0), name='premium_amount_positive'),
+            models.UniqueConstraint(fields=['client', 'start_date'], name='premium_unique_start'),
+        ]
+
+    def __str__(self):
+        return f'{self.client} {self.start_date:%d/%m/%Y}-{self.end_date:%d/%m/%Y} : {self.amount}'
 
 
 class ReferenceChange(models.Model):
