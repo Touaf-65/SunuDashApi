@@ -6,7 +6,9 @@ Une seule règle pour toutes les routes de `dashboard/` :
 - l'admin territorial et le chef de département technique ne voient que **leur pays** : le pays, l'employeur,
   la police ou le prestataire demandés dans l'URL doivent lui appartenir ;
 - les vues globales (multi-pays) sont réservées à l'admin global (`global_only = True` sur la vue) ;
-- les autres rôles (super-utilisateur, responsable opérateur…) n'ont pas accès aux statistiques.
+- le responsable opérateur n'accède qu'aux vues des opérateurs de saisie (`operator_view = True`), pour son pays
+  (lot D4) ;
+- les autres rôles (super-utilisateur…) n'ont pas accès aux statistiques.
 
 Un objet d'un autre pays (ou inexistant) donne le même refus (403), pour ne pas révéler son existence. Les
 combinaisons incohérentes de l'URL (employeur hors du pays indiqué, police non rattachée à l'employeur) donnent 404.
@@ -14,7 +16,7 @@ combinaisons incohérentes de l'URL (employeur hors du pays indiqué, police non
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import BasePermission
 
-from core.models import Client, Partner, Policy
+from core.models import Client, Insured, Operator, Partner, Policy
 
 DENIED_MESSAGE = "Vous n'avez pas accès à ces statistiques."
 
@@ -23,6 +25,8 @@ SCOPED_OBJECTS = {
     'client_id': Client,
     'policy_id': Policy,
     'partner_id': Partner,
+    'insured_id': Insured,
+    'operator_id': Operator,
 }
 
 
@@ -70,7 +74,9 @@ class StatisticsAccess(BasePermission):
             return True
         if getattr(view, 'global_only', False):
             return False
-        if not (user.is_admin_territorial() or user.is_chef_dept_tech()) or not user.country_id:
+        allowed = user.is_admin_territorial() or user.is_chef_dept_tech() or (
+            getattr(view, 'operator_view', False) and user.is_responsable_operateur())
+        if not allowed or not user.country_id:
             return False
         if not objects_in_country(kwargs, user.country_id):
             return False

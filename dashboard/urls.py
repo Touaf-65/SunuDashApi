@@ -1,4 +1,9 @@
 from django.urls import path
+from .directory_views import (
+    InsuredDirectoryView, InsuredSheetView, InsuredClaimsView,
+    PartnerDirectoryView, PartnerSheetView, PartnerClaimsView,
+    OperatorDirectoryView, OperatorSheetView, OperatorLinesView,
+)
 from .views import (
     # Global Statistics
     GlobalStatisticsDetailView, 
@@ -99,4 +104,15 @@ urlpatterns = [
     
     # Partner Statistics
     path('partners/<int:partner_id>/statistics/', PartnerStatisticsView.as_view(), name='partner-statistics-detail'),
+
+    # Listes et fiches (lot D4)
+    path('countries/<int:country_id>/insureds/directory/', InsuredDirectoryView.as_view(), name='insured-directory'),
+    path('insureds/<int:insured_id>/sheet/', InsuredSheetView.as_view(), name='insured-sheet'),
+    path('insureds/<int:insured_id>/claims/', InsuredClaimsView.as_view(), name='insured-claims'),
+    path('countries/<int:country_id>/partners/directory/', PartnerDirectoryView.as_view(), name='partner-directory'),
+    path('partners/<int:partner_id>/sheet/', PartnerSheetView.as_view(), name='partner-sheet'),
+    path('partners/<int:partner_id>/claims/', PartnerClaimsView.as_view(), name='partner-claims'),
+    path('countries/<int:country_id>/operators/', OperatorDirectoryView.as_view(), name='operator-directory'),
+    path('operators/<int:operator_id>/sheet/', OperatorSheetView.as_view(), name='operator-sheet'),
+    path('operators/<int:operator_id>/lines/', OperatorLinesView.as_view(), name='operator-lines'),
 ]

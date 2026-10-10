@@ -2505,9 +2505,10 @@ class DataPeriodView(APIView):
 
     GET /dashboard/period/?country_id=  -> {"date_start": "AAAA-MM-JJ" | null, "date_end": ...}
     Admin global : tous les pays, ou le pays demandé ; admin territorial et chef de département technique : leur
-    pays, quel que soit le paramètre.
+    pays, quel que soit le paramètre (le responsable opérateur aussi, pour les pages des opérateurs de saisie).
     """
     permission_classes = [StatisticsAccess]
+    operator_view = True
 
     def get(self, request):
         claims = Claim.objects.filter(claimed_amount__isnull=False)
