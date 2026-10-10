@@ -13,7 +13,7 @@ This guide provides a comprehensive understanding of the relationships between C
 │ • id            │◄───┤ • country       │◄───┤ • client        │
 │ • name          │    │ • name          │    │ • policy_number │
 │ • code          │    │ • contact       │    │ • creation_date │
-└─────────────────┘    │ • prime         │    └─────────────────┘
+└─────────────────┘    │ • premiums      │    └─────────────────┘
                        │ • creation_date │             │
                        └─────────────────┘             │
                                 │                      │
@@ -424,7 +424,7 @@ Client.objects.bulk_create([
 ])
 
 # Efficient bulk update
-Client.objects.bulk_update(clients, ['prime', 'modification_date'])
+Client.objects.bulk_update(clients, ['contact', 'modification_date'])
 ```
 
 ## Data Integrity Constraints
