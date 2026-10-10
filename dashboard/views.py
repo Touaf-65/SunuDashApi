@@ -3,7 +3,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from .access import StatisticsAccess
-from core.models import Client
+from django.db.models import Max, Min
+from core.models import Claim, Client
 from .services.country_statistics import CountryStatisticsService
 from .services.global_statistics import GlobalStatisticsService, CountriesListStatisticsService
 from .services.client_statistics import ClientStatisticsService, ClientStatisticListService, GlobalClientsListService, CountryClientStatisticsService, GlobalClientStatisticsService
@@ -2496,4 +2497,31 @@ class ClientSearchView(APIView):
 
 class GlobalClientSearchView(ClientSearchView):
     global_only = True  # vue multi-pays : admin global uniquement
+
+
+class DataPeriodView(APIView):
+    """
+    Période couverte par les sinistres importés (lot D3) : période par défaut des tableaux de bord.
+
+    GET /dashboard/period/?country_id=  -> {"date_start": "AAAA-MM-JJ" | null, "date_end": ...}
+    Admin global : tous les pays, ou le pays demandé ; admin territorial et chef de département technique : leur
+    pays, quel que soit le paramètre.
+    """
+    permission_classes = [StatisticsAccess]
+
+    def get(self, request):
+        claims = Claim.objects.filter(claimed_amount__isnull=False)
+        if request.user.is_admin_global():
+            country_id = request.query_params.get('country_id')
+            if country_id:
+                if not str(country_id).isdigit():
+                    return Response({"error": "country_id invalide."}, status=status.HTTP_400_BAD_REQUEST)
+                claims = claims.filter(policy__country_id=int(country_id))
+        else:
+            claims = claims.filter(policy__country_id=request.user.country_id)
+        bounds = claims.aggregate(start=Min('settlement_date'), end=Max('settlement_date'))
+        return Response({
+            'date_start': bounds['start'].date().isoformat() if bounds['start'] else None,
+            'date_end': bounds['end'].date().isoformat() if bounds['end'] else None,
+        }, status=status.HTTP_200_OK)
 

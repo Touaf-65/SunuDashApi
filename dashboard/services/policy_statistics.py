@@ -10,6 +10,7 @@ from .base import (
     format_date_label
 )
 from core.services.premium_service import current_summary, premium_series, sp_series, client_sp, sp_summary
+from . import indicators as ind
 import logging
 import json
 import math
@@ -73,14 +74,9 @@ class ClientPolicyStatisticsService:
             self.client = self.policy.client
             self.client_id = self.client.id
             
-            # Base claims queryset for this policy
-            self.claims = Claim.objects.select_related(
-                'employer', 'insured', 'partner'
-            ).filter(
-                policy_id=self.policy_id,
-                settlement_date__range=(self.date_start, self.date_end),
-                claimed_amount__isnull=False
-            )
+            # Sinistres de la police (sans filtre de date : périmètre des indicateurs), puis ceux de la période
+            self.scope_claims = Claim.objects.filter(policy_id=self.policy_id, claimed_amount__isnull=False)
+            self.claims = ind.in_period(self.scope_claims, self.date_start, self.date_end)                 .select_related('employer', 'insured', 'partner')
             
             # Generate all periods for the date range
             self.periods = generate_periods(self.date_start, self.date_end, self.granularity)
@@ -173,66 +169,6 @@ class ClientPolicyStatisticsService:
             return nb_total_series
         except Exception as e:
             logger.exception(f"Error in get_nb_total_series: {e}")
-            raise
-    
-    def generate_statistics(self):
-        """
-        Generates comprehensive statistics for the policy in the exact format expected by the view.
-        
-        Returns:
-            dict: Complete statistics matching the original view format
-        """
-        try:
-            # Get basic series
-            consumption_series = self.get_consumption_series()
-            nb_primary_series = self.get_nb_primary_series()
-            nb_total_series = self.get_nb_total_series()
-            
-            # Calculate evolution rates and actual values
-            consumption_evolution_rate = self._compute_evolution_rate(consumption_series)
-            actual_consumption_value = self._get_actual_value(consumption_series)
-            
-            nb_primary_evolution_rate = self._compute_evolution_rate(nb_primary_series)
-            actual_nb_primary_value = self._get_actual_value(nb_primary_series)
-            
-            nb_total_evolution_rate = self._compute_evolution_rate(nb_total_series)
-            actual_nb_total_value = self._get_actual_value(nb_total_series)
-            
-            # Get complex series
-            nb_assures_par_type_series = self._get_nb_assures_par_type_series()
-            top5_familles_conso_series, top5_familles_labels = self._get_top5_familles_conso_series()
-            top5_categories_actes_series, top5_categories_labels = self._get_top5_categories_actes_series()
-            top5_partners_conso_series, top5_partners_labels, top_partners_table = self._get_top5_partners_conso_series()
-            
-            # Get policy info
-            policy_number = self.policy.policy_number
-            consommation_percentages_client_polices = self._get_consommation_percentages_client_polices()
-            
-            return {
-                "granularity": self.granularity,
-                "policy_number": policy_number,
-                "consommation_percentages_client_polices": consommation_percentages_client_polices,
-                "consumption_series": consumption_series,
-                "consumption_evolution_rate": consumption_evolution_rate,
-                "actual_consumption_value": actual_consumption_value,
-                "nb_primary_series": nb_primary_series,
-                "nb_primary_evolution_rate": nb_primary_evolution_rate,
-                "actual_nb_primary_value": actual_nb_primary_value,
-                "nb_total_series": nb_total_series,
-                "nb_total_evolution_rate": nb_total_evolution_rate,
-                "actual_nb_total_value": actual_nb_total_value,
-                "nb_assures_par_type_series": nb_assures_par_type_series,
-                "top5_familles_conso_series": top5_familles_conso_series,
-                "top5_familles_labels": top5_familles_labels,
-                "top5_categories_actes_series": top5_categories_actes_series,
-                "top5_categories_labels": top5_categories_labels,
-                "top5_partners_conso_series": top5_partners_conso_series,
-                "top5_partners_labels": top5_partners_labels,
-                "top_partners_table": top_partners_table
-            }
-            
-        except Exception as e:
-            logger.exception(f"Error generating policy statistics: {e}")
             raise
     
     def _get_nb_assures_par_type_series(self):
@@ -552,20 +488,21 @@ class ClientPolicyStatisticsService:
             dict: Complete statistics matching the original view format
         """
         try:
-            # Get basic series
-            consumption_series = self.get_consumption_series()
-            nb_primary_series = self.get_nb_primary_series()
-            nb_total_series = self.get_nb_total_series()
-            
-            # Calculate evolution rates and actual values
-            consumption_evolution_rate = self._compute_evolution_rate(consumption_series)
-            actual_consumption_value = self._get_actual_value(consumption_series)
-            
-            nb_primary_evolution_rate = self._compute_evolution_rate(nb_primary_series)
-            actual_nb_primary_value = self._get_actual_value(nb_primary_series)
-            
-            nb_total_evolution_rate = self._compute_evolution_rate(nb_total_series)
-            actual_nb_total_value = self._get_actual_value(nb_total_series)
+            # Indicateurs communs (lot D3) : sommes de la période, assurés ayant consommé, évolution par rapport à
+            # la période précédente de même durée ; prime et S/P = primes des employeurs de la police
+            employer_ids = list(self.policy.employers.values_list('id', flat=True))
+            current, evolutions, previous = ind.kpis_with_evolution(self.scope_claims, employer_ids,
+                                                                    self.date_start, self.date_end)
+            consumption_series = serie_to_pairs(ind.sum_series(self.claims, self.trunc, self.periods, 'reimbursed_amount'))
+            nb_primary_series = serie_to_pairs(
+                ind.distinct_series(self.claims.filter(membership__role='primary'), self.trunc, self.periods, 'insured_id'))
+            nb_total_series = serie_to_pairs(ind.distinct_series(self.claims, self.trunc, self.periods, 'insured_id'))
+            consumption_evolution_rate = evolutions['reimbursed']
+            actual_consumption_value = current['reimbursed']
+            nb_primary_evolution_rate = evolutions['principals']
+            actual_nb_primary_value = current['principals']
+            nb_total_evolution_rate = evolutions['insureds']
+            actual_nb_total_value = current['insureds']
             
             # Get complex series
             nb_assures_par_type_series = self._get_nb_assures_par_type_series()
@@ -597,7 +534,16 @@ class ClientPolicyStatisticsService:
                 "top5_categories_labels": top5_categories_labels,
                 "top5_partners_conso_series": top5_partners_conso_series,
                 "top5_partners_labels": top5_partners_labels,
-                "top_partners_table": top_partners_table
+                "top_partners_table": top_partners_table,
+                "actual_claimed_value": current['claimed'],
+                "claimed_evolution_rate": evolutions['claimed'],
+                "actual_claims_value": current['claims'],
+                "actual_premium_value": current['premium'],
+                "premium_evolution_rate": evolutions['premium'],
+                "actual_sp_ratio_value": current['sp_ratio'],
+                "sp_ratio_evolution_rate": evolutions['sp_ratio'],
+                "enrolled_insured": ind.enrolled(InsuredEmployer.objects.filter(policy_id=self.policy_id)),
+                "previous_values": previous,
             }
             
         except Exception as e:
@@ -1822,19 +1768,14 @@ class GlobalPolicyStatisticsDetailService:
             self.insured_employers = InsuredEmployer.objects.all()
             self.claims = Claim.objects.all()
             
-            # Apply date filters
-            self.clients = self.clients.filter(
-                creation_date__range=(self.date_start, self.date_end)
-            )
-            self.policies = self.policies.filter(
-                creation_date__range=(self.date_start, self.date_end)
-            )
-            self.insured_employers = self.insured_employers.filter(
-                insured__creation_date__range=(self.date_start, self.date_end)
-            )
+            # Activité de la période (lot D3) : sinistres réglés sur la période ; employeurs, polices et assurés
+            # comptés s'ils ont consommé (la date de création en base n'est que la date de l'import)
             self.claims = self.claims.filter(
                 settlement_date__range=(self.date_start, self.date_end)
             )
+            self.clients = self.clients.filter(id__in=self.claims.values('employer_id'))
+            self.policies = self.policies.filter(id__in=self.claims.values('policy_id'))
+            self.insured_employers = self.insured_employers.filter(insured_id__in=self.claims.values('insured_id'))
             
             logger.info(f"Global detailed statistics: {self.clients.count()} clients, {self.policies.count()} policies")
             
@@ -1962,19 +1903,14 @@ class CountryPolicyStatisticsDetailService:
             self.insured_employers = InsuredEmployer.objects.filter(employer__country_id=self.country_id)
             self.claims = Claim.objects.filter(policy__country_id=self.country_id)
             
-            # Apply date filters
-            self.clients = self.clients.filter(
-                creation_date__range=(self.date_start, self.date_end)
-            )
-            self.policies = self.policies.filter(
-                creation_date__range=(self.date_start, self.date_end)
-            )
-            self.insured_employers = self.insured_employers.filter(
-                insured__creation_date__range=(self.date_start, self.date_end)
-            )
+            # Activité de la période (lot D3) : sinistres réglés sur la période ; employeurs, polices et assurés
+            # comptés s'ils ont consommé (la date de création en base n'est que la date de l'import)
             self.claims = self.claims.filter(
                 settlement_date__range=(self.date_start, self.date_end)
             )
+            self.clients = self.clients.filter(id__in=self.claims.values('employer_id'))
+            self.policies = self.policies.filter(id__in=self.claims.values('policy_id'))
+            self.insured_employers = self.insured_employers.filter(insured_id__in=self.claims.values('insured_id'))
             
             logger.info(f"Country {self.country_id} detailed statistics: {self.clients.count()} clients, {self.policies.count()} policies")
             
@@ -2346,10 +2282,11 @@ class SpecificPolicyStatisticsService:
             total_reimbursed = sum(point['value'] for point in reimbursed_evolution)
             total_claimed = sum(point['value'] for point in claimed_evolution)
             
-            # Calculate S/P ratio
-            sp_ratio = 0.0
-            if total_claimed > 0:
-                sp_ratio = round((total_reimbursed / total_claimed) * 100, 2)
+            # Taux de remboursement (remboursé / réclamé, en %) ; le S/P (sinistres / primes) se calcule avec les
+            # primes des employeurs de la police (premium_service)
+            reimbursement_rate = round((total_reimbursed / total_claimed) * 100, 2) if total_claimed > 0 else 0.0
+            sp = sp_summary(list(self.policy.employers.values_list('id', flat=True)), self.date_start, self.date_end,
+                            self.claims)
             
             return {
                 "policy": {
@@ -2370,7 +2307,9 @@ class SpecificPolicyStatisticsService:
                     "total_claims": total_claims,
                     "total_reimbursed": total_reimbursed,
                     "total_claimed": total_claimed,
-                    "sp_ratio": sp_ratio,
+                    "reimbursement_rate": reimbursement_rate,
+                    "premium": sp['premium'],
+                    "sp_ratio": sp['ratio'],
                 },
                 "time_series": {
                     "claims_evolution": claims_evolution,

@@ -140,7 +140,7 @@ def sanitize_float(value):
     if isinstance(value, float):
         if math.isnan(value) or math.isinf(value):
             return 0.0  # Replace NaN/inf with 0
-        return round(value, 2)  # Round to 2 decimal places
+        return round(value, 4)  # 4 décimales : garde la précision des ratios S/P
     elif isinstance(value, dict):
         return {key: sanitize_float(val) for key, val in value.items()}
     elif isinstance(value, list):
@@ -225,6 +225,17 @@ def serie_to_pairs(serie):
     return [[to_timestamp_ms(point['period']), float(point['value'] or 0)] for point in serie]
 
 
+def align_period_start(value, granularity):
+    """Début de la tranche (jour, mois, trimestre, année) qui contient `value`."""
+    if granularity == 'month':
+        return value.replace(day=1)
+    if granularity == 'quarter':
+        return value.replace(month=3 * ((value.month - 1) // 3) + 1, day=1)
+    if granularity == 'year':
+        return value.replace(month=1, day=1)
+    return value
+
+
 def generate_periods(date_start, date_end, granularity):
     """
     Generates all periods between two dates according to the granularity.
@@ -238,8 +249,10 @@ def generate_periods(date_start, date_end, granularity):
         list: List of generated periods
     """
     periods = []
-    current = date_start
-    
+    # Débuts de tranche alignés sur ce que renvoient TruncMonth / TruncQuarter / TruncYear (1er du mois, du trimestre,
+    # de l'année) : sinon une période commençant le 15 ne retrouve aucune valeur agrégée (lot D3).
+    current = align_period_start(date_start, granularity)
+
     while current <= date_end:
         periods.append(current)
         if granularity == 'day':

@@ -8,6 +8,7 @@ from .base import (
     format_top_clients_series, format_top_insureds_series, sanitize_float
 )
 from core.services.premium_service import current_summary, premium_series, sp_series, client_sp, sp_summary
+from . import indicators as ind
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,8 +32,16 @@ def fill_full_series_forward_fill(periods, serie):
 
 class CountryInsuredStatisticsService:
     """
-    Statistiques sur les assurés d'un pays sur une période donnée.
+    Statistiques sur les assurés d'un pays sur une période (lot D3) : assurés **ayant consommé** (au moins un
+    sinistre réglé sur la période), par rôle (adhésion portée par le sinistre), nouveaux assurés (premier sinistre
+    dans la période), et assurés **inscrits** (toutes les personnes connues sur les polices du pays).
     """
+    ROLE_LABELS = {
+        'primary': 'Assuré principal',
+        'spouse': 'Conjoint(e)',
+        'child': 'Enfant',
+    }
+
     def __init__(self, country_id, date_start_str, date_end_str):
         try:
             self.country_id = int(country_id)
@@ -45,203 +54,98 @@ class CountryInsuredStatisticsService:
             raise ValidationError(f"Invalid parameters: {e}")
 
     def _setup_base_filters(self):
-        try:
-            self.country = Country.objects.get(id=self.country_id)
-            # Tous les assurés du pays (via client)
-            self.clients = Client.objects.filter(country_id=self.country_id)
-            self.client_ids = list(self.clients.values_list('id', flat=True))
-            self.policies = Policy.objects.filter(employers__in=self.client_ids).distinct()
-            self.policy_ids = list(self.policies.values_list('id', flat=True))
-            self.insured_employers = InsuredEmployer.objects.filter(employer_id__in=self.client_ids)
-            self.insured_ids = list(self.insured_employers.values_list('insured_id', flat=True))
-            self.insureds = Insured.objects.filter(id__in=self.insured_ids)
-            self.claims = Claim.objects.filter(
-                insured_id__in=self.insured_ids,
-                settlement_date__range=(self.date_start, self.date_end),
-                claimed_amount__isnull=False
-            )
-            self.periods = generate_periods(self.date_start, self.date_end, self.granularity)
-        except Exception as e:
-            logger.error(f"Error setting up base filters: {e}")
-            raise ValidationError(f"Error setting up filters: {e}")
-
-    def get_consuming_insured_evolution(self):
-        try:
-            result = list(
-                self.claims.annotate(period=self.trunc('settlement_date'))
-                .values('period')
-                .annotate(value=Count('insured_id', distinct=True))
-                .order_by('period')
-            )
-            return result
-        except Exception as e:
-            logger.exception(f"Error in get_consuming_insured_evolution: {e}")
-            raise
-
-    def get_insured_by_role_evolution(self, role):
-        try:
-            result = list(
-                self.insured_employers.filter(role=role, insured__creation_date__range=(self.date_start, self.date_end))
-                .annotate(period=self.trunc('insured__creation_date'))
-                .values('period')
-                .annotate(value=Count('insured_id', distinct=True))
-                .order_by('period')
-            )
-            return result
-        except Exception as e:
-            logger.exception(f"Error in get_insured_by_role_evolution for role {role}: {e}")
-            raise
+        self.country = Country.objects.filter(id=self.country_id).first()
+        if not self.country:
+            raise ValidationError(f"Pays {self.country_id} introuvable")
+        self.client_ids = list(Client.objects.filter(country_id=self.country_id).values_list('id', flat=True))
+        self.insured_employers = InsuredEmployer.objects.filter(policy__country_id=self.country_id)
+        self.scope_claims = Claim.objects.filter(policy__country_id=self.country_id, claimed_amount__isnull=False)
+        self.claims = ind.in_period(self.scope_claims, self.date_start, self.date_end)
+        self.periods = generate_periods(self.date_start, self.date_end, self.granularity)
 
     def get_consumption_by_role(self):
-        try:
-            roles = ['primary', 'spouse', 'child']
-            consumption_by_role = {}
-            for role in roles:
-                claims_role = self.claims.filter(insured__insured_clients__role=role)
-                value = claims_role.aggregate(val=Sum('reimbursed_amount'))['val'] or 0
-                consumption_by_role[role] = value
-            return consumption_by_role
-        except Exception as e:
-            logger.exception(f"Error in get_consumption_by_role: {e}")
-            raise
+        """Montant remboursé sur la période par rôle (adhésion du sinistre : un sinistre compte une seule fois)."""
+        totals = dict(self.claims.values('membership__role').annotate(v=Sum('reimbursed_amount'))
+                      .values_list('membership__role', 'v'))
+        return {role: float(totals.get(role) or 0) for role in ind.ROLES}
 
     def get_consumption_by_role_timeseries(self):
-        try:
-            roles = ['primary', 'spouse', 'child']
-            consumption_by_role = {}
-            for role in roles:
-                claims_role = self.claims.filter(insured__insured_clients__role=role)
-                result = list(
-                    claims_role.annotate(period=self.trunc('settlement_date'))
-                    .values('period')
-                    .annotate(value=Sum('reimbursed_amount'))
-                    .order_by('period')
-                )
-                for point in result:
-                    point['value'] = float(point['value'] or 0)
-                consumption_by_role[role] = result
-            return consumption_by_role
-        except Exception as e:
-            logger.exception(f"Error in get_consumption_by_role_timeseries: {e}")
-            raise
+        rows = (self.claims.annotate(period=self.trunc('settlement_date')).values('period', 'membership__role')
+                .annotate(value=Sum('reimbursed_amount')))
+        out = {role: [] for role in ind.ROLES}
+        for row in rows:
+            if row['membership__role'] in out:
+                out[row['membership__role']].append({'period': row['period'], 'value': float(row['value'] or 0)})
+        return {role: ind.fill_zero(self.periods, serie) for role, serie in out.items()}
 
     def get_top_insureds_consumption_series(self, limit=10):
-        try:
-            # Top assurés par consommation totale
-            top_insureds = list(
-                self.claims.values('insured_id')
-                .annotate(total_consumption=Sum('reimbursed_amount'))
-                .order_by('-total_consumption')[:limit]
+        top_insureds = list(
+            self.claims.values('insured_id')
+            .annotate(total_consumption=Sum('reimbursed_amount'))
+            .order_by('-total_consumption')[:limit]
+        )
+        top_insured_ids = [c['insured_id'] for c in top_insureds]
+        insured_names = dict(Insured.objects.filter(id__in=top_insured_ids).values_list('id', 'name'))
+        top_insureds_series = []
+        for insured_id in top_insured_ids:
+            insured_series = list(
+                self.claims.filter(insured_id=insured_id).annotate(period=self.trunc('settlement_date'))
+                .values('period').annotate(value=Sum('reimbursed_amount')).order_by('period')
             )
-            top_insured_ids = [c['insured_id'] for c in top_insureds]
-            insured_names = {i.id: i.name for i in self.insureds.filter(id__in=top_insured_ids)}
-            # Générer la série temporelle pour chaque assuré
-            top_insureds_series = []
-            for insured_id in top_insured_ids:
-                insured_claims = self.claims.filter(insured_id=insured_id)
-                insured_series = list(
-                    insured_claims.annotate(period=self.trunc('settlement_date'))
-                    .values('period')
-                    .annotate(value=Sum('reimbursed_amount'))
-                    .order_by('period')
-                )
-                for point in insured_series:
-                    point['value'] = float(point['value'] or 0)
-                top_insureds_series.append({
-                    'insured_id': insured_id,
-                    'insured_name': insured_names.get(insured_id, str(insured_id)),
-                    'series': insured_series
-                })
-            # Format pour ApexCharts
-            periods = self.periods
-            series_multi, categories = format_top_insureds_series(top_insureds_series, periods, self.granularity)
-            return series_multi, categories
-        except Exception as e:
-            logger.exception(f"Error in get_top_insureds_consumption_series: {e}")
-            raise
+            for point in insured_series:
+                point['value'] = float(point['value'] or 0)
+            top_insureds_series.append({
+                'insured_id': insured_id,
+                'insured_name': insured_names.get(insured_id, str(insured_id)),
+                'series': insured_series
+            })
+        return format_top_insureds_series(top_insureds_series, self.periods, self.granularity)
 
-    def _calculate_actual_values(self, consuming_series, primary_series, spouse_series, child_series):
-        def safe_last(series):
-            if not series:
-                return 0
-            return series[-1]['value'] if isinstance(series[-1], dict) else series[-1][1]
-        return {
-            'actual_consuming_insured_count': safe_last(consuming_series),
-            'actual_primary_insured_count': safe_last(primary_series),
-            'actual_spouse_insured_count': safe_last(spouse_series),
-            'actual_child_insured_count': safe_last(child_series),
-        }
-
-    def _calculate_evolution_rates(self, consuming_series, primary_series, spouse_series, child_series):
-        def safe_rate(series):
-            if not series or len(series) < 2:
-                return 0.0
-            v0 = series[0]['value'] if isinstance(series[0], dict) else series[0][1]
-            v1 = series[-1]['value'] if isinstance(series[-1], dict) else series[-1][1]
-            v0 = 0 if v0 is None else v0
-            v1 = 0 if v1 is None else v1
-            if v0 == 0:
-                return float('inf') if v1 != 0 else 0.0
-            return round((v1 - v0) / v0, 4)
-        return {
-            'consuming_insured_evolution_rate': safe_rate(consuming_series),
-            'primary_insured_evolution_rate': safe_rate(primary_series),
-            'spouse_insured_evolution_rate': safe_rate(spouse_series),
-            'child_insured_evolution_rate': safe_rate(child_series),
-        }
+    def _role_counts(self, start, end):
+        claims = ind.in_period(self.scope_claims, start, end)
+        counts = dict(claims.values('membership__role').annotate(n=Count('insured_id', distinct=True))
+                      .values_list('membership__role', 'n'))
+        return {role: counts.get(role, 0) for role in ind.ROLES}
 
     def get_complete_statistics(self):
-        try:
-            consuming_evolution = self.get_consuming_insured_evolution()
-            primary_evolution = self.get_insured_by_role_evolution('primary')
-            spouse_evolution = self.get_insured_by_role_evolution('spouse')
-            child_evolution = self.get_insured_by_role_evolution('child')
-            periods = self.periods
-            # Forward fill
-            consuming_evolution_full = fill_full_series_forward_fill(periods, consuming_evolution)
-            primary_evolution_full = fill_full_series_forward_fill(periods, primary_evolution)
-            spouse_evolution_full = fill_full_series_forward_fill(periods, spouse_evolution)
-            child_evolution_full = fill_full_series_forward_fill(periods, child_evolution)
-            consumption_by_role = self.get_consumption_by_role()
-            consumption_by_role_timeseries = self.get_consumption_by_role_timeseries()
-            top_insureds_series, top_insureds_categories = self.get_top_insureds_consumption_series(10)
-            # Multi-line chart pour la consommation par type d'assuré
-            role_labels = {
-                'primary': 'Assuré principal',
-                'spouse': 'Conjoint(e)',
-                'child': 'Enfant',
-            }
-            consumption_by_role_series = format_series_for_multi_line_chart(
-                consumption_by_role_timeseries, periods, self.granularity, role_labels
-            )
-            actual_values = self._calculate_actual_values(
-                consuming_evolution_full, primary_evolution_full, spouse_evolution_full, child_evolution_full
-            )
-            evolution_rates = self._calculate_evolution_rates(
-                consuming_evolution_full, primary_evolution_full, spouse_evolution_full, child_evolution_full
-            )
-            return sanitize_float({
-                'granularity': self.granularity,
-                'consuming_insured_evolution': serie_to_pairs(consuming_evolution_full),
-                'primary_insured_evolution': serie_to_pairs(primary_evolution_full),
-                'spouse_insured_evolution': serie_to_pairs(spouse_evolution_full),
-                'child_insured_evolution': serie_to_pairs(child_evolution_full),
-                'consumption_by_role': consumption_by_role,
-                'consumption_by_role_series': consumption_by_role_series,
-                'top_insureds_consumption_series': top_insureds_series,
-                'top_insureds_consumption_categories': top_insureds_categories,
-                **actual_values,
-                **evolution_rates,
-                'country': {
-                    'id': self.country.id,
-                    'name': self.country.name
-                },
-                'date_start': self.date_start.isoformat(),
-                'date_end': self.date_end.isoformat(),
-            })
-        except Exception as e:
-            logger.exception(f"Error in get_complete_statistics: {e}")
-            raise
+        current, evolutions, previous = ind.kpis_with_evolution(self.scope_claims, self.client_ids,
+                                                                self.date_start, self.date_end)
+        roles_now = self._role_counts(self.date_start, self.date_end)
+        roles_before = self._role_counts(*ind.previous_period(self.date_start, self.date_end))
+        consuming = ind.distinct_series(self.claims, self.trunc, self.periods, 'insured_id')
+        by_role = ind.consumers_by_role_series(self.claims, self.trunc, self.periods)
+        top_insureds_series, top_insureds_categories = self.get_top_insureds_consumption_series(10)
+        return sanitize_float({
+            'granularity': self.granularity,
+            # Assurés ayant consommé, par tranche
+            'consuming_insured_evolution': serie_to_pairs(consuming),
+            'primary_insured_evolution': serie_to_pairs(by_role['primary']),
+            'spouse_insured_evolution': serie_to_pairs(by_role['spouse']),
+            'child_insured_evolution': serie_to_pairs(by_role['child']),
+            'consumption_by_role': self.get_consumption_by_role(),
+            'consumption_by_role_series': format_series_for_multi_line_chart(
+                self.get_consumption_by_role_timeseries(), self.periods, self.granularity, self.ROLE_LABELS),
+            'top_insureds_consumption_series': top_insureds_series,
+            'top_insureds_consumption_categories': top_insureds_categories,
+            # Valeurs de la période et évolution / période précédente de même durée
+            'actual_consuming_insured_count': current['insureds'],
+            'actual_primary_insured_count': roles_now['primary'],
+            'actual_spouse_insured_count': roles_now['spouse'],
+            'actual_child_insured_count': roles_now['child'],
+            'actual_new_insured_count': current['new_insureds'],
+            'consuming_insured_evolution_rate': evolutions['insureds'],
+            'primary_insured_evolution_rate': ind.evolution(roles_now['primary'], roles_before['primary']),
+            'spouse_insured_evolution_rate': ind.evolution(roles_now['spouse'], roles_before['spouse']),
+            'child_insured_evolution_rate': ind.evolution(roles_now['child'], roles_before['child']),
+            # Assurés inscrits (toutes périodes) sur les polices du pays
+            'enrolled_insured': ind.enrolled(self.insured_employers),
+            'country': {
+                'id': self.country.id,
+                'name': self.country.name
+            },
+            'date_start': self.date_start.isoformat(),
+            'date_end': self.date_end.isoformat(),
+        })
 
 
 class CountryInsuredListService:

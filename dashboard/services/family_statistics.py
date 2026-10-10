@@ -8,6 +8,7 @@ from .base import (
     format_top_clients_series, format_top_insureds_series, sanitize_float
 )
 from core.services.premium_service import current_summary, premium_series, sp_series, client_sp, sp_summary
+from . import indicators as ind
 import logging
 from .insured_statistics import fill_full_series_forward_fill
 
@@ -41,11 +42,8 @@ class CountryFamilyStatisticsService:
             self.insured_ids = list(self.insured_employers.values_list('insured_id', flat=True))
             self.insureds = Insured.objects.filter(id__in=self.insured_ids)
             # Claims pour la période
-            self.claims = Claim.objects.filter(
-                insured_id__in=self.insured_ids,
-                settlement_date__range=(self.date_start, self.date_end),
-                claimed_amount__isnull=False
-            )
+            self.scope_claims = Claim.objects.filter(insured_id__in=self.insured_ids, claimed_amount__isnull=False)
+            self.claims = ind.in_period(self.scope_claims, self.date_start, self.date_end)
             self.periods = generate_periods(self.date_start, self.date_end, self.granularity)
         except Exception as e:
             logger.error(f"Error setting up base filters: {e}")
@@ -53,20 +51,10 @@ class CountryFamilyStatisticsService:
 
     def get_families_evolution(self):
         """
-        Évolution du nombre de familles (assurés principaux).
+        Familles ayant consommé, par tranche (lot D3 ; la date d'import n'est plus utilisée).
         """
         try:
-            result = list(
-                self.insured_employers.filter(
-                    role='primary',
-                    insured__creation_date__range=(self.date_start, self.date_end)
-                )
-                .annotate(period=self.trunc('insured__creation_date'))
-                .values('period')
-                .annotate(value=Count('insured_id', distinct=True))
-                .order_by('period')
-            )
-            return result
+            return ind.families_series(self.claims, self.trunc, self.periods)
         except Exception as e:
             logger.exception(f"Error in get_families_evolution: {e}")
             raise
@@ -171,7 +159,7 @@ class CountryFamilyStatisticsService:
                 return 0
             return series[-1]['value'] if isinstance(series[-1], dict) else series[-1][1]
         return {
-            'actual_families_count': safe_last(families_series),
+            'actual_families_count': ind.families_count(self.claims),
             'actual_spouse_count': self.get_spouse_count(),
             'actual_child_count': self.get_child_count(),
         }
@@ -188,7 +176,9 @@ class CountryFamilyStatisticsService:
                 return float('inf') if v1 != 0 else 0.0
             return round((v1 - v0) / v0, 4)
         return {
-            'families_evolution_rate': safe_rate(families_series),
+            'families_evolution_rate': ind.evolution(
+                ind.families_count(self.claims),
+                ind.families_count(ind.in_period(self.scope_claims, *ind.previous_period(self.date_start, self.date_end)))),
         }
 
     def get_complete_statistics(self):
@@ -396,11 +386,8 @@ class ClientFamilyStatisticsService:
             self.insured_ids = list(self.insured_employers.values_list('insured_id', flat=True))
             self.insureds = Insured.objects.filter(id__in=self.insured_ids)
             # Claims pour la période
-            self.claims = Claim.objects.filter(
-                insured_id__in=self.insured_ids,
-                settlement_date__range=(self.date_start, self.date_end),
-                claimed_amount__isnull=False
-            )
+            self.scope_claims = Claim.objects.filter(insured_id__in=self.insured_ids, claimed_amount__isnull=False)
+            self.claims = ind.in_period(self.scope_claims, self.date_start, self.date_end)
             self.periods = generate_periods(self.date_start, self.date_end, self.granularity)
         except Exception as e:
             logger.error(f"Error setting up base filters: {e}")
@@ -408,20 +395,10 @@ class ClientFamilyStatisticsService:
 
     def get_families_evolution(self):
         """
-        Évolution du nombre de familles (assurés principaux) pour ce client.
+        Familles ayant consommé, par tranche (lot D3 ; la date d'import n'est plus utilisée).
         """
         try:
-            result = list(
-                self.insured_employers.filter(
-                    role='primary',
-                    insured__creation_date__range=(self.date_start, self.date_end)
-                )
-                .annotate(period=self.trunc('insured__creation_date'))
-                .values('period')
-                .annotate(value=Count('insured_id', distinct=True))
-                .order_by('period')
-            )
-            return result
+            return ind.families_series(self.claims, self.trunc, self.periods)
         except Exception as e:
             logger.exception(f"Error in get_families_evolution: {e}")
             raise
@@ -525,7 +502,7 @@ class ClientFamilyStatisticsService:
                 return 0
             return series[-1]['value'] if isinstance(series[-1], dict) else series[-1][1]
         return {
-            'actual_families_count': safe_last(families_series),
+            'actual_families_count': ind.families_count(self.claims),
             'actual_spouse_count': self.get_spouse_count(),
             'actual_child_count': self.get_child_count(),
         }
@@ -542,7 +519,9 @@ class ClientFamilyStatisticsService:
                 return float('inf') if v1 != 0 else 0.0
             return round((v1 - v0) / v0, 4)
         return {
-            'families_evolution_rate': safe_rate(families_series),
+            'families_evolution_rate': ind.evolution(
+                ind.families_count(self.claims),
+                ind.families_count(ind.in_period(self.scope_claims, *ind.previous_period(self.date_start, self.date_end)))),
         }
 
     def get_complete_statistics(self):

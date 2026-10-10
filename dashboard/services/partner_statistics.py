@@ -1,6 +1,6 @@
 from django.db.models import Sum, Count, Q
 from django.core.exceptions import ValidationError
-from core.models import Partner, Claim, InsuredEmployer
+from core.models import Partner, Claim, ClaimLine, InsuredEmployer
 from countries.models import Country
 from .base import (
     get_granularity, get_trunc_function, parse_date_range,
@@ -8,6 +8,7 @@ from .base import (
     compute_evolution_rate, format_series_for_multi_line_chart,
     sanitize_float, format_top_clients_series
 )
+from . import indicators as ind
 import logging
 
 logger = logging.getLogger(__name__)
@@ -1018,13 +1019,9 @@ class PartnerStatisticsService:
             if not self.partner:
                 raise ValidationError(f"Partner with ID {self.partner_id} does not exist")
             # Claims liés à ce partenaire
-            self.claims = Claim.objects.select_related(
-                'employer', 'insured', 'partner'
-            ).filter(
-                partner_id=self.partner_id,
-                settlement_date__range=(self.date_start, self.date_end),
-                claimed_amount__isnull=False
-            )
+            self.scope_claims = Claim.objects.filter(partner_id=self.partner_id, claimed_amount__isnull=False)
+            self.claims = ind.in_period(self.scope_claims, self.date_start, self.date_end) \
+                .select_related('employer', 'insured', 'partner')
             # Montants de ce partenaire : portés par ses sinistres
             self.invoices = self.claims
             # Clients ayant eu des consommations chez ce partenaire
@@ -1190,37 +1187,29 @@ class PartnerStatisticsService:
             logger.exception(f"Error in get_acts_count_evolution: {e}")
             raise
 
-    def _calculate_actual_values(self, clients_series, insured_series, reimbursed_series, claimed_series, acts_series):
-        def safe_last(series):
-            if not series:
-                return 0
-            return series[-1]['value'] if isinstance(series[-1], dict) else series[-1][1]
+    def _period_values(self, start, end):
+        """Valeurs d'une période (lot D3) : sommes et effectifs distincts, et non la dernière tranche."""
+        claims = ind.in_period(self.scope_claims, start, end)
+        totals = claims.aggregate(claimed=Sum('claimed_amount'), reimbursed=Sum('reimbursed_amount'))
         return {
-            'actual_clients_count': safe_last(clients_series),
-            'actual_insured_count': safe_last(insured_series),
-            'actual_reimbursed_amount': safe_last(reimbursed_series),
-            'actual_claimed_amount': safe_last(claimed_series),
-            'actual_acts_count': safe_last(acts_series),
+            'actual_clients_count': claims.exclude(employer_id__isnull=True).values('employer_id').distinct().count(),
+            'actual_insured_count': claims.values('insured_id').distinct().count(),
+            'actual_reimbursed_amount': float(totals['reimbursed'] or 0),
+            'actual_claimed_amount': float(totals['claimed'] or 0),
+            'actual_acts_count': ClaimLine.objects.filter(claim__in=claims).count(),
         }
 
-    def _calculate_evolution_rates(self, clients_series, insured_series, reimbursed_series, claimed_series, acts_series):
-        def safe_rate(series):
-            if not series or len(series) < 2:
-                return 0.0
-            v0 = series[0]['value'] if isinstance(series[0], dict) else series[0][1]
-            v1 = series[-1]['value'] if isinstance(series[-1], dict) else series[-1][1]
-            v0 = 0 if v0 is None else v0
-            v1 = 0 if v1 is None else v1
-            if v0 == 0:
-                return float('inf') if v1 != 0 else 0.0
-            return round((v1 - v0) / v0, 4) 
-        return {
-            'clients_evolution_rate': safe_rate(clients_series),
-            'insured_evolution_rate': safe_rate(insured_series),
-            'reimbursed_evolution_rate': safe_rate(reimbursed_series),
-            'claimed_evolution_rate': safe_rate(claimed_series),
-            'acts_evolution_rate': safe_rate(acts_series),
-        }
+    def _calculate_actual_values(self, *series):
+        return self._period_values(self.date_start, self.date_end)
+
+    def _calculate_evolution_rates(self, *series):
+        """Évolution (%) par rapport à la période précédente de même durée."""
+        now = self._period_values(self.date_start, self.date_end)
+        before = self._period_values(*ind.previous_period(self.date_start, self.date_end))
+        names = {'actual_clients_count': 'clients_evolution_rate', 'actual_insured_count': 'insured_evolution_rate',
+                 'actual_reimbursed_amount': 'reimbursed_evolution_rate', 'actual_claimed_amount': 'claimed_evolution_rate',
+                 'actual_acts_count': 'acts_evolution_rate'}
+        return {rate: ind.evolution(now[key], before[key]) for key, rate in names.items()}
 
     def get_complete_statistics(self):
         """
@@ -1236,11 +1225,11 @@ class PartnerStatisticsService:
             top_clients_series, top_clients_categories = self.get_top_clients_consumption_series(10)
             periods = generate_periods(self.date_start, self.date_end, self.granularity)
             # Compléter les séries pour tous les points de la période
-            clients_evolution_full = fill_full_series(periods, clients_evolution)
-            insured_evolution_full = fill_full_series(periods, insured_evolution)
-            reimbursed_evolution_full = fill_full_series(periods, reimbursed_evolution)
-            claimed_evolution_full = fill_full_series(periods, claimed_evolution)
-            acts_count_evolution_full = fill_full_series(periods, acts_count_evolution)
+            clients_evolution_full = ind.fill_zero(periods, clients_evolution)
+            insured_evolution_full = ind.fill_zero(periods, insured_evolution)
+            reimbursed_evolution_full = ind.fill_zero(periods, reimbursed_evolution)
+            claimed_evolution_full = ind.fill_zero(periods, claimed_evolution)
+            acts_count_evolution_full = ind.fill_zero(periods, acts_count_evolution)
             # Format multi-line chart pour la consommation par type d'assuré
             role_labels = {
                 'primary': 'Assuré principal',

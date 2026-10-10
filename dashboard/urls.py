@@ -48,9 +48,13 @@ from .views import (
     # Recherche
     ClientSearchView,
     GlobalClientSearchView,
+    DataPeriodView,
 )
 
 urlpatterns = [
+    # Période couverte par les données importées (période par défaut des tableaux de bord)
+    path('period/', DataPeriodView.as_view(), name='data-period'),
+
     # Global Statistics
     path('global/statistics/', GlobalStatisticsDetailView.as_view(), name='global-statistics-detail'),
     path('global/countries/statistics/', GlobalCountriesListStatisticsView.as_view(), name='global-countries-list-statistics'),

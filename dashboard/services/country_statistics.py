@@ -1,286 +1,48 @@
-from django.db.models import Sum, Count, Q, Max
+from django.db.models import Sum
 from django.core.exceptions import ValidationError
-from core.models import Client, Claim, InsuredEmployer, Policy, Insured
+from core.models import Client, Claim, InsuredEmployer
 from .base import (
     get_granularity, get_trunc_function, parse_date_range,
     generate_periods, fill_full_series, serie_to_pairs,
-    compute_evolution_rate, format_series_for_multi_line_chart,
-    format_top_clients_series, to_date
+    format_series_for_multi_line_chart, format_top_clients_series,
 )
-from core.services.premium_service import current_summary, premium_series, sp_series, client_sp, sp_summary
+from . import indicators as ind
+from core.services.premium_service import premium_series, sp_series, sp_summary
 import logging
 
 logger = logging.getLogger(__name__)
 
-class CountryStatisticsService:
+ROLE_LABELS = {
+    'primary': 'Assurés principaux',
+    'spouse': 'Conjoints',
+    'child': 'Enfants',
+}
+
+
+class ScopeStatisticsService:
     """
-    Service to generate statistics for a country over a given period.
+    Tableau de bord d'un périmètre (un pays, ou tous les pays) sur une période : indicateurs définis dans
+    `indicators.py` (lot D3). Les sous-classes fixent le périmètre dans `_setup_scope()` :
+    `self.client_ids` (employeurs), `self.scope_claims` (sinistres sans filtre de date),
+    `self.insured_employers` (adhésions, pour les inscrits).
     """
-    
-    def __init__(self, country_id, date_start_str, date_end_str):
-        """
-        Initializes the service with the basic parameters.
-        
-        Args:
-            country_id (int): Country ID
-            date_start_str (str): Start date in YYYY-MM-DD format
-            date_end_str (str): End date in YYYY-MM-DD format
-        """
+
+    def __init__(self, date_start_str, date_end_str):
         try:
-            self.country_id = int(country_id)
             self.date_start, self.date_end = parse_date_range(date_start_str, date_end_str)
             self.granularity = get_granularity(self.date_start, self.date_end)
             self.trunc = get_trunc_function(self.granularity)
-            self._setup_base_filters()
+            self._setup_scope()
+            self.claims = ind.in_period(self.scope_claims, self.date_start, self.date_end)
         except (ValueError, TypeError) as e:
-            logger.error(f"Invalid parameters for CountryStatisticsService: {e}")
+            logger.error(f"Invalid parameters for {type(self).__name__}: {e}")
             raise ValidationError(f"Invalid parameters: {e}")
-    
-    def _setup_base_filters(self):
-        """
-        Configures the base filters for queries with optimized querysets.
-        """
-        try:
-            self.clients = Client.objects.select_related('country').filter(
-                country_id=self.country_id
-            )
-            
-            if not self.clients.exists():
-                logger.warning(f"No clients found for country_id: {self.country_id}")
-            
-            self.client_ids = list(self.clients.values_list('id', flat=True))
-            
-            self.policies = Policy.objects.filter(employers__in=self.client_ids).distinct()
-            self.policy_ids = list(self.policies.values_list('id', flat=True))
-            
-            # Optimized claims queryset with proper joins
-            self.claims = Claim.objects.select_related(
-                'employer', 'insured'
-            ).filter(
-                policy__in=self.policy_ids,
-                settlement_date__range=(self.date_start, self.date_end),
-                claimed_amount__isnull=False
-            )
-            
-        except Exception as e:
-            logger.error(f"Error setting up base filters: {e}")
-            raise ValidationError(f"Error setting up filters: {e}")
-    
-    def get_clients_timeseries(self):
-        """
-        Calculates the evolution of the number of clients.
-        
-        Returns:
-            list: Time series of the number of clients
-        """
-        try:
-            result = list(
-                self.clients.filter(creation_date__range=(self.date_start, self.date_end))
-                .annotate(period=self.trunc('creation_date'))
-                .values('period')
-                .annotate(value=Count('id'))
-                .order_by('period')
-            )        
-            for point in result:
-                point['value'] = int(point['value'] or 0)
-            
-            return result
-        except Exception as e:
-            logger.exception(f"Error in get_clients_timeseries: {e}")
-            raise
-    
-    def get_prime_timeseries(self):
-        """
-        Primes en vigueur par tranche de temps (primes entières des employeurs ; historique Premium).
-        """
-        try:
-            periods = generate_periods(self.date_start, self.date_end, self.granularity)
-            return premium_series(self.client_ids, periods, self.date_end)
-        except Exception as e:
-            logger.exception(f"Error in get_prime_timeseries: {e}")
-            raise
-    
-    def get_reimbursed_amount_timeseries(self):
-        """
-        Calculates the evolution of the reimbursed amount.
-        
-        Returns:
-            list: Time series of reimbursed amounts
-        """
-        try:
-            result = list(
-                self.claims.annotate(period=self.trunc('settlement_date'))
-                .values('period')
-                .annotate(value=Sum('reimbursed_amount'))
-                .order_by('period')
-            )            
-            for point in result:
-                point['value'] = float(point['value'] or 0)       
-            return result
-        except Exception as e:
-            logger.exception(f"Error in get_reimbursed_amount_timeseries: {e}")
-            raise
-    
-    def get_claimed_amount_timeseries(self):
-        """
-        Calculates the evolution of the claimed amount.
-        
-        Returns:
-            list: Time series of claimed amounts
-        """
-        try:
-            result = list(
-                self.claims.annotate(period=self.trunc('settlement_date'))
-                .values('period')
-                .annotate(value=Sum('claimed_amount'))
-                .order_by('period')
-            )            
-            for point in result:
-                point['value'] = float(point['value'] or 0)
-            
-            return result
-        except Exception as e:
-            logger.exception(f"Error in get_claimed_amount_timeseries: {e}")
-            raise
-    
-    def get_partners_timeseries(self):
-        """
-        Calculates the evolution of the number of distinct partners.
-        
-        Returns:
-            list: Time series of the number of partners
-        """
-        try:
-            result = list(
-                self.claims.annotate(period=self.trunc('settlement_date'))
-                .values('period')
-                .annotate(value=Count('partner', distinct=True))
-                .order_by('period')
-            )
-            for point in result:
-                point['value'] = int(point['value'] or 0)
-            return result
-        except Exception as e:
-            logger.exception(f"Error in get_partners_timeseries: {e}")
-            raise
-    
-    def get_sp_ratio_timeseries(self, prime_series, reimbursed_series):
-        """
-        Calculates the evolution of the S/P ratio (Claims/Premiums).
-        
-        Args:
-            prime_series (list): Series of premiums
-            reimbursed_series (list): Series of reimbursements
-            
-        Returns:
-            list: Time series of S/P ratios
-        """
-        primes_by_period = {point['period']: float(point['value'] or 0) for point in prime_series}
-        rembourse_by_period = {point['period']: float(point['value'] or 0) for point in reimbursed_series}
-        all_periods = sorted(set(primes_by_period.keys()) | set(rembourse_by_period.keys()))
-        
-        ratio_series = []
-        for period in all_periods:
-            prime = primes_by_period.get(period, 0)
-            remboursement = rembourse_by_period.get(period, 0)
-            ratio = remboursement / prime if prime else None
-            ratio_series.append({"period": period, "value": ratio})
-        
-        return ratio_series
-    
-    def get_primary_insured_timeseries(self):
-        """
-        Calculates the evolution of the number of principal insured.
-        
-        Returns:
-            list: Time series of principal insured
-        """
-        try:
-            result = list(
-                InsuredEmployer.objects.filter(
-                    employer_id__in=self.client_ids,
-                    role='primary',
-                    insured__creation_date__range=(self.date_start, self.date_end)
-                )
-                .annotate(period=self.trunc('insured__creation_date'))
-                .values('period')
-                .annotate(value=Count('insured_id', distinct=True))
-                .order_by('period')
-            )
-            for point in result:
-                point['value'] = int(point['value'] or 0)
-            return result
-        except Exception as e:
-            logger.exception(f"Error in get_primary_insured_timeseries: {e}")
-            raise
 
-    
-    def get_total_insured_timeseries(self):
-        """
-        Calculates the evolution of the total number of insured.
-        
-        Returns:
-            list: Time series of total insured
-        """
-        try:
-            result = list(
-                InsuredEmployer.objects.filter(
-                    employer_id__in=self.client_ids,
-                    insured__creation_date__range=(self.date_start, self.date_end)
-                )
-                .annotate(period=self.trunc('insured__creation_date'))
-                .values('period')
-                .annotate(value=Count('insured_id', distinct=True))
-                .order_by('period')
-            )
-            for point in result:
-                point['value'] = int(point['value'] or 0)
-            return result
-        except Exception as e:
-            logger.exception(f"Error in get_total_insured_timeseries: {e}")
-            raise
-    
-    def get_insured_by_role_timeseries(self):
-        """
-        Calculates the evolution of the number of insured by role type.
-        
-        Returns:
-            dict: Dictionary of series by role
-        """
-        roles = ['primary', 'spouse', 'child', 'other']
-        insured_by_role = {}
-        
-        for role in roles:
-            try:
-                series = list(
-                    InsuredEmployer.objects.filter(
-                        employer_id__in=self.client_ids,
-                        role=role,
-                        insured__creation_date__range=(self.date_start, self.date_end)
-                    )
-                    .annotate(period=self.trunc('insured__creation_date'))
-                    .values('period')
-                    .annotate(value=Count('insured_id', distinct=True))
-                    .order_by('period')
-                )
-                for point in series:
-                    point['value'] = int(point['value'] or 0)
-                insured_by_role[role] = series
-            except Exception as e:
-                logger.exception(f"Error in get_insured_by_role_timeseries for role {role}: {e}")
-                raise
-        return insured_by_role
-    
+    def _setup_scope(self):
+        raise NotImplementedError
+
     def get_top_clients_consumption(self, limit=5):
-        """
-        Calculates the top clients with the highest consumption.
-        
-        Args:
-            limit (int): Number of clients to return
-            
-        Returns:
-            list: Data of top clients with their time series
-        """
+        """Les `limit` employeurs qui ont le plus consommé (remboursé) sur la période, avec leur série."""
         top_clients = list(
             self.claims.values('employer_id')
             .annotate(total_consumption=Sum('reimbursed_amount'))
@@ -288,15 +50,11 @@ class CountryStatisticsService:
         )
         top_client_ids = [c['employer_id'] for c in top_clients]
         client_names = {c.id: c.name for c in Client.objects.filter(id__in=top_client_ids)}
-
         top_clients_series = []
         for client_id in top_client_ids:
-            client_claims = self.claims.filter(employer_id=client_id)
             client_series = list(
-                client_claims.annotate(period=self.trunc('settlement_date'))
-                .values('period')
-                .annotate(value=Sum('reimbursed_amount'))
-                .order_by('period')
+                self.claims.filter(employer_id=client_id).annotate(period=self.trunc('settlement_date'))
+                .values('period').annotate(value=Sum('reimbursed_amount')).order_by('period')
             )
             for point in client_series:
                 point['value'] = float(point['value'] or 0)
@@ -306,130 +64,86 @@ class CountryStatisticsService:
                 "series": client_series
             })
         return top_clients_series
-    
-    def get_complete_statistics(self):
-        """
-        Generates all statistics for the country in an optimized manner.
-        
-        Returns:
-            dict: Complete dictionary of statistics
-        """
-        # Collecting all base series
-        clients_series = self.get_clients_timeseries()
-        primes_series = self.get_prime_timeseries()
-        reimbursed_series = self.get_reimbursed_amount_timeseries()
-        claimed_series = self.get_claimed_amount_timeseries()
-        partners_series = self.get_partners_timeseries()
-        primary_insured_series = self.get_primary_insured_timeseries()
-        total_insured_series = self.get_total_insured_timeseries()
-        insured_by_role = self.get_insured_by_role_timeseries()
-        top_clients_series = self.get_top_clients_consumption()
-        
-        # Generating complete periods
-        periods = generate_periods(self.date_start, self.date_end, self.granularity)
 
-        # Ratio S/P par tranche : consommation de la tranche / primes entières en vigueur (premium_service)
+    def get_complete_statistics(self):
+        periods = generate_periods(self.date_start, self.date_end, self.granularity)
+        current, evolutions, previous = ind.kpis_with_evolution(self.scope_claims, self.client_ids,
+                                                                self.date_start, self.date_end)
+        prev_start, prev_end = ind.previous_period(self.date_start, self.date_end)
+
+        # Séries par tranche : flux à 0 dans une tranche vide ; la prime en vigueur (stock) est reportée
+        clients_series = ind.distinct_series(self.claims, self.trunc, periods, 'employer_id')
+        new_clients_series = ind.new_series(self.scope_claims, self.trunc, periods, 'employer_id',
+                                            self.date_start, self.date_end)
+        primes_series = fill_full_series(periods, premium_series(self.client_ids, periods, self.date_end))
+        reimbursed_series = ind.sum_series(self.claims, self.trunc, periods, 'reimbursed_amount')
+        claimed_series = ind.sum_series(self.claims, self.trunc, periods, 'claimed_amount')
+        partners_series = ind.distinct_series(self.claims, self.trunc, periods, 'partner_id')
+        total_insured_series = ind.distinct_series(self.claims, self.trunc, periods, 'insured_id')
+        by_role = ind.consumers_by_role_series(self.claims, self.trunc, periods)
         sp_ratio_series = sp_series(self.client_ids, periods, self.date_end, self.claims)
-        sp_total = sp_summary(self.client_ids, self.date_start, self.date_end, self.claims)
-        
-        # Filling series with all periods
-        clients_series_full = fill_full_series(periods, clients_series)
-        primes_series_full = fill_full_series(periods, primes_series)
-        reimbursed_series_full = fill_full_series(periods, reimbursed_series)
-        claimed_series_full = fill_full_series(periods, claimed_series)
-        primary_insured_series_full = fill_full_series(periods, primary_insured_series)
-        total_insured_series_full = fill_full_series(periods, total_insured_series)
-        
-        # Converting to pairs for ApexCharts
-        clients_series_pairs = serie_to_pairs(clients_series_full)
-        primes_series_pairs = serie_to_pairs(primes_series_full)
-        reimbursed_series_pairs = serie_to_pairs(reimbursed_series_full)
-        claimed_series_pairs = serie_to_pairs(claimed_series_full)
-        primary_insured_series = serie_to_pairs(primary_insured_series_full)
-        total_insured_series_pairs = serie_to_pairs(total_insured_series_full)
-        partners_series_pairs = serie_to_pairs(partners_series)
-        sp_ratio_series_pairs = serie_to_pairs(sp_ratio_series)
-        
-        # Formatting series by insured type
-        role_labels = {
-            'primary': 'Assurés  Principaux',
-            'spouse': 'Assurés Conjoints',
-            'child': 'Assurés Enfants',
-        }
-        insured_by_role_series = format_series_for_multi_line_chart(
-            insured_by_role, periods, self.granularity, role_labels
-        )
-        
-        # Formatting top clients
+
         top_clients_series_multi, top_clients_categories = format_top_clients_series(
-            top_clients_series, periods, self.granularity
+            self.get_top_clients_consumption(), periods, self.granularity
         )
-        
-        # Calculating actual values
-        actual_values = self._calculate_actual_values(
-            clients_series_full, primes_series_full, reimbursed_series_full, claimed_series_full,
-            primary_insured_series_full, total_insured_series_full
-        )
-        
-        # Calculating evolution rates  
-        evolution_rates = self._calculate_evolution_rates(
-            clients_series_full, primes_series_full, reimbursed_series_full, claimed_series_full,
-            primary_insured_series_full, total_insured_series_full
-        )
-        
+
         return {
             "granularity": self.granularity,
-            "clients_series": clients_series_pairs,
-            "prime_globale_series": primes_series_pairs,
-            "montant_rembourse_series": reimbursed_series_pairs,
-            "montant_reclame_series": claimed_series_pairs,
-            "partners_series": partners_series_pairs,
-            "sp_ratio_series": sp_ratio_series_pairs,
-            # S/P de la période : consommation couverte / primes entières en vigueur
-            "sp_ratio_total": sp_total,
-            "nb_assures_principaux_series": primary_insured_series,
-            "nb_assures_total_series": total_insured_series_pairs,
-            "nb_assures_par_type_series": insured_by_role_series,
+            "period": {
+                "date_start": self.date_start.date().isoformat(), "date_end": self.date_end.date().isoformat(),
+                "previous_start": prev_start.date().isoformat(), "previous_end": prev_end.date().isoformat(),
+            },
+            # Séries
+            "clients_series": serie_to_pairs(clients_series),
+            "nouveaux_clients_series": serie_to_pairs(new_clients_series),
+            "prime_globale_series": serie_to_pairs(primes_series),
+            "montant_rembourse_series": serie_to_pairs(reimbursed_series),
+            "montant_reclame_series": serie_to_pairs(claimed_series),
+            "partners_series": serie_to_pairs(partners_series),
+            "sp_ratio_series": serie_to_pairs(sp_ratio_series),
+            "nb_assures_principaux_series": serie_to_pairs(by_role['primary']),
+            "nb_assures_total_series": serie_to_pairs(total_insured_series),
+            "nb_assures_par_type_series": format_series_for_multi_line_chart(by_role, periods, self.granularity,
+                                                                             ROLE_LABELS),
             "top5_clients_conso_series": top_clients_series_multi,
             "top5_clients_conso_categories": top_clients_categories,
-            **actual_values,
-            **evolution_rates
+            # S/P de la période : consommation couverte / primes entières en vigueur
+            "sp_ratio_total": sp_summary(self.client_ids, self.date_start, self.date_end, self.claims),
+            # Valeurs de la période (sommes, effectifs distincts) et évolution / période précédente de même durée
+            "actual_nb_clients_value": current['employers'],
+            "actual_nouveaux_clients_value": current['new_employers'],
+            "actual_prime_globale_value": current['premium'],
+            "actual_sp_ratio_value": current['sp_ratio'],
+            "actual_montant_rembourse_value": current['reimbursed'],
+            "actual_montant_reclame_value": current['claimed'],
+            "actual_nb_sinistres_value": current['claims'],
+            "actual_nb_assures_principaux_value": current['principals'],
+            "actual_nb_assures_total_value": current['insureds'],
+            "actual_nouveaux_assures_value": current['new_insureds'],
+            "actual_employeurs_sans_prime_value": current['employers_without_premium'],
+            "nb_assures_inscrits": ind.enrolled(self.insured_employers),
+            "clients_evolution_rate": evolutions['employers'],
+            "prime_globale_evolution_rate": evolutions['premium'],
+            "sp_ratio_evolution_rate": evolutions['sp_ratio'],
+            "montant_rembourse_evolution_rate": evolutions['reimbursed'],
+            "montant_reclame_evolution_rate": evolutions['claimed'],
+            "nb_assures_principaux_evolution_rate": evolutions['principals'],
+            "nb_assures_total_evolution_rate": evolutions['insureds'],
+            "previous_values": previous,
         }
-    
-    def _calculate_actual_values(self, clients_series_full, primes_series_full, reimbursed_series, 
-                                claimed_series_full, primary_insured_series, total_insured_series):
-        """
-        Calculates the peak (max) value for each metric over the period.
 
-        Returns:
-            dict: Dictionary of peak values
-        """
-        def max_value(series):
-            values = [point['value'] for point in series if point['value'] is not None]
-            return max(values) if values else 0
 
-        return {
-            "actual_nb_clients_value": int(max_value(clients_series_full)),
-            "actual_prime_globale_value": float(max_value(primes_series_full)),
-            "actual_montant_rembourse_value": float(max_value(reimbursed_series)),
-            "actual_montant_reclame_value": float(max_value(claimed_series_full)),
-            "actual_nb_assures_principaux_value": float(max_value(primary_insured_series)),
-            "actual_nb_assures_total_value": float(max_value(total_insured_series)),
-        }
-    
-    def _calculate_evolution_rates(self, clients_series, primes_series, reimbursed_series,
-                                  claimed_series, primary_insured_series, total_insured_series):
-        """
-        Calculates the evolution rates of various metrics.
-        
-        Returns:
-            dict: Dictionary of evolution rates
-        """
-        return {
-            "clients_evolution_rate": compute_evolution_rate(clients_series),
-            "prime_globale_evolution_rate": compute_evolution_rate(primes_series),
-            "montant_rembourse_evolution_rate": compute_evolution_rate(reimbursed_series),
-            "montant_reclame_evolution_rate": compute_evolution_rate(claimed_series),
-            "nb_assures_principaux_evolution_rate": compute_evolution_rate(primary_insured_series),
-            "nb_assures_total_evolution_rate": compute_evolution_rate(total_insured_series),
-        }
+class CountryStatisticsService(ScopeStatisticsService):
+    """Tableau de bord d'un pays."""
+
+    def __init__(self, country_id, date_start_str, date_end_str):
+        try:
+            self.country_id = int(country_id)
+        except (ValueError, TypeError) as e:
+            raise ValidationError(f"Invalid parameters: {e}")
+        super().__init__(date_start_str, date_end_str)
+
+    def _setup_scope(self):
+        self.client_ids = list(Client.objects.filter(country_id=self.country_id).values_list('id', flat=True))
+        self.scope_claims = Claim.objects.filter(policy__country_id=self.country_id, claimed_amount__isnull=False)
+        self.insured_employers = InsuredEmployer.objects.filter(policy__country_id=self.country_id)
