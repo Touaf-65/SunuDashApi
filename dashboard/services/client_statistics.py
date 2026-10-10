@@ -135,8 +135,8 @@ class ClientStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_policies_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_policies_evolution: {e}")
+            raise
     
     def get_premium_evolution(self):
         """
@@ -146,8 +146,8 @@ class ClientStatisticsService:
             periods = generate_periods(self.date_start, self.date_end, self.granularity)
             return premium_series([self.client_id], periods, self.date_end)
         except Exception as e:
-            logger.error(f"Error in get_premium_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_premium_evolution: {e}")
+            raise
 
     def get_reimbursed_amount_evolution(self):
         """
@@ -170,8 +170,8 @@ class ClientStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_reimbursed_amount_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_reimbursed_amount_evolution: {e}")
+            raise
     
     def get_claimed_amount_evolution(self):
         """
@@ -194,8 +194,8 @@ class ClientStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_claimed_amount_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_claimed_amount_evolution: {e}")
+            raise
     
     def get_partners_evolution(self):
         """
@@ -218,8 +218,8 @@ class ClientStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_partners_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_partners_evolution: {e}")
+            raise
     
     def get_sp_ratio_evolution(self, premium_series, reimbursed_series):
         """
@@ -252,8 +252,8 @@ class ClientStatisticsService:
             
             return ratio_series
         except Exception as e:
-            logger.error(f"Error in get_sp_ratio_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_sp_ratio_evolution: {e}")
+            raise
     
     def get_primary_insured_evolution(self):
         """
@@ -281,8 +281,8 @@ class ClientStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_primary_insured_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_primary_insured_evolution: {e}")
+            raise
     
     def get_total_insured_evolution(self):
         """
@@ -309,8 +309,8 @@ class ClientStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_total_insured_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_total_insured_evolution: {e}")
+            raise
     
     def get_insured_by_role_evolution(self):
         """
@@ -342,8 +342,8 @@ class ClientStatisticsService:
                 
                 insured_by_role[role] = result
             except Exception as e:
-                logger.error(f"Error in get_insured_by_role_evolution for role {role}: {e}")
-                insured_by_role[role] = []
+                logger.exception(f"Error in get_insured_by_role_evolution for role {role}: {e}")
+                raise
         
         return insured_by_role
     
@@ -375,8 +375,8 @@ class ClientStatisticsService:
             
             return consumption_by_role
         except Exception as e:
-            logger.error(f"Error in get_consumption_by_role_timeseries: {e}")
-            return {}
+            logger.exception(f"Error in get_consumption_by_role_timeseries: {e}")
+            raise
     
     def get_top_partners_consumption(self, limit=5):
         """
@@ -423,8 +423,8 @@ class ClientStatisticsService:
             
             return top_partners_series
         except Exception as e:
-            logger.error(f"Error in get_top_partners_consumption: {e}")
-            return []
+            logger.exception(f"Error in get_top_partners_consumption: {e}")
+            raise
     
     def get_top_partners_table(self, limit=5):
         """
@@ -461,8 +461,8 @@ class ClientStatisticsService:
             
             return top_partners_table
         except Exception as e:
-            logger.error(f"Error in get_top_partners_table: {e}")
-            return []
+            logger.exception(f"Error in get_top_partners_table: {e}")
+            raise
     
     def get_top_acts_consumption(self, limit=5):
         """
@@ -502,8 +502,8 @@ class ClientStatisticsService:
                 })
             return top_acts_series
         except Exception as e:
-            logger.error(f"Error in get_top_acts_consumption: {e}")
-            return []
+            logger.exception(f"Error in get_top_acts_consumption: {e}")
+            raise
     
     def get_top_categories_consumption(self, limit=5):
         """
@@ -544,8 +544,8 @@ class ClientStatisticsService:
                 })
             return top_categories_series
         except Exception as e:
-            logger.error(f"Error in get_top_categories_consumption: {e}")
-            return []
+            logger.exception(f"Error in get_top_categories_consumption: {e}")
+            raise
     
 
     
@@ -684,15 +684,8 @@ class ClientStatisticsService:
                 "actual_total_insured_value": safe_max_int(total_insured_series),
             }
         except Exception as e:
-            logger.error(f"Error calculating actual values: {e}")
-            return {
-                "actual_policies_value": 0,
-                "actual_premium_value": 0.0,
-                "actual_reimbursed_amount_value": 0.0,
-                "actual_claimed_amount_value": 0.0,
-                "actual_primary_insured_value": 0,
-                "actual_total_insured_value": 0,
-            }
+            logger.exception(f"Error calculating actual values: {e}")
+            raise
     
     def _calculate_evolution_rates(self, policies_series, premium_series, reimbursed_series,
                                   claimed_series, primary_insured_series, total_insured_series):
@@ -712,15 +705,8 @@ class ClientStatisticsService:
                 "total_insured_evolution_rate": compute_evolution_rate(total_insured_series),
             }
         except Exception as e:
-            logger.error(f"Error calculating evolution rates: {e}")
-            return {
-                "policies_evolution_rate": 0.0,
-                "premium_evolution_rate": 0.0,
-                "reimbursed_amount_evolution_rate": 0.0,
-                "claimed_amount_evolution_rate": 0.0,
-                "primary_insured_evolution_rate": 0.0,
-                "total_insured_evolution_rate": 0.0,
-            }
+            logger.exception(f"Error calculating evolution rates: {e}")
+            raise
 
 
 
@@ -786,8 +772,8 @@ class ClientStatisticListService:
             return sanitize_float(results)
             
         except Exception as e:
-            logger.error(f"Error generating clients statistics list: {e}")
-            return []
+            logger.exception(f"Error generating clients statistics list: {e}")
+            raise
     
     def _get_client_statistics(self, client):
         """
@@ -842,17 +828,8 @@ class ClientStatisticListService:
             }
             
         except Exception as e:
-            logger.error(f"Error calculating statistics for client {client.id}: {e}")
-            return {
-                "client_id": client.id,
-                "client_name": client.name,
-                "contact": client.contact or "",
-                "nb_policies": 0,
-                "nb_primary_insured": 0,
-                "nb_total_insured": 0,
-                "total_consumption": 0.0,
-                "total_reimbursement": 0.0
-            }
+            logger.exception(f"Error calculating statistics for client {client.id}: {e}")
+            raise
 
 
 
@@ -911,8 +888,8 @@ class GlobalClientsListService:
             return sanitize_float(results)
             
         except Exception as e:
-            logger.error(f"Error generating all clients statistics list: {e}")
-            return []
+            logger.exception(f"Error generating all clients statistics list: {e}")
+            raise
     
     def _get_client_statistics(self, client):
         """
@@ -969,19 +946,8 @@ class GlobalClientsListService:
             }
             
         except Exception as e:
-            logger.error(f"Error calculating statistics for client {client.id}: {e}")
-            return {
-                "client_id": client.id,
-                "client_name": client.name,
-                "contact": client.contact or "",
-                "country_id": client.country.id if client.country else None,
-                "country_name": client.country.name if client.country else None,
-                "nb_policies": 0,
-                "nb_primary_insured": 0,
-                "nb_total_insured": 0,
-                "total_consumption": 0.0,
-                "total_reimbursement": 0.0
-            }
+            logger.exception(f"Error calculating statistics for client {client.id}: {e}")
+            raise
 
 
 class GlobalClientStatisticsService:
@@ -1040,8 +1006,8 @@ class GlobalClientStatisticsService:
         try:
             return self.clients.count()
         except Exception as e:
-            logger.error(f"Error getting total clients count: {e}")
-            return 0
+            logger.exception(f"Error getting total clients count: {e}")
+            raise
 
     def get_countries_count(self):
         """
@@ -1053,8 +1019,8 @@ class GlobalClientStatisticsService:
         try:
             return self.clients.values('country').distinct().count()
         except Exception as e:
-            logger.error(f"Error getting countries count: {e}")
-            return 0
+            logger.exception(f"Error getting countries count: {e}")
+            raise
 
     def get_total_premium_amount(self):
         """
@@ -1067,8 +1033,8 @@ class GlobalClientStatisticsService:
             # Primes en vigueur aujourd'hui (Premium, historisées par période)
             return current_summary(self.clients.values_list('id', flat=True), self.claims)['premium']
         except Exception as e:
-            logger.error(f"Error getting total premium amount: {e}")
-            return 0.0
+            logger.exception(f"Error getting total premium amount: {e}")
+            raise
 
     def get_total_claimed_amount(self):
         """
@@ -1081,8 +1047,8 @@ class GlobalClientStatisticsService:
             total = self.invoices.aggregate(total=Sum('claimed_amount'))['total']
             return float(total or 0)
         except Exception as e:
-            logger.error(f"Error getting total claimed amount: {e}")
-            return 0.0
+            logger.exception(f"Error getting total claimed amount: {e}")
+            raise
 
     def _calculate_sp_ratio(self):
         """
@@ -1096,8 +1062,8 @@ class GlobalClientStatisticsService:
             ratio = current_summary(self.clients.values_list('id', flat=True), self.claims)['ratio']
             return round(ratio * 100, 2) if ratio is not None else 0.0
         except Exception as e:
-            logger.error(f"Error calculating S/P ratio: {e}")
-            return 0.0
+            logger.exception(f"Error calculating S/P ratio: {e}")
+            raise
 
     def get_complete_statistics(self):
         """
@@ -1115,8 +1081,8 @@ class GlobalClientStatisticsService:
                 "sp_ratio": self._calculate_sp_ratio(),
             }
         except Exception as e:
-            logger.error(f"Error getting complete statistics: {e}")
-            return {}
+            logger.exception(f"Error getting complete statistics: {e}")
+            raise
 
 
 class CountryClientStatisticsService:
@@ -1182,8 +1148,8 @@ class CountryClientStatisticsService:
         try:
             return self.clients.count()
         except Exception as e:
-            logger.error(f"Error getting total clients count: {e}")
-            return 0
+            logger.exception(f"Error getting total clients count: {e}")
+            raise
 
     def get_total_premium_amount(self):
         """
@@ -1196,8 +1162,8 @@ class CountryClientStatisticsService:
             # Primes en vigueur aujourd'hui (Premium, historisées par période)
             return current_summary(self.clients.values_list('id', flat=True), self.claims)['premium']
         except Exception as e:
-            logger.error(f"Error getting total premium amount: {e}")
-            return 0.0
+            logger.exception(f"Error getting total premium amount: {e}")
+            raise
 
     def get_total_claimed_amount(self):
         """
@@ -1210,8 +1176,8 @@ class CountryClientStatisticsService:
             total = self.invoices.aggregate(total=Sum('claimed_amount'))['total']
             return float(total or 0)
         except Exception as e:
-            logger.error(f"Error getting total claimed amount: {e}")
-            return 0.0
+            logger.exception(f"Error getting total claimed amount: {e}")
+            raise
 
     def get_total_insured_count(self):
         """
@@ -1223,8 +1189,8 @@ class CountryClientStatisticsService:
         try:
             return self.insured_employers.values('insured').distinct().count()
         except Exception as e:
-            logger.error(f"Error getting total insured count: {e}")
-            return 0
+            logger.exception(f"Error getting total insured count: {e}")
+            raise
 
     def _calculate_sp_ratio(self):
         """
@@ -1238,8 +1204,8 @@ class CountryClientStatisticsService:
             ratio = current_summary(self.clients.values_list('id', flat=True), self.claims)['ratio']
             return round(ratio * 100, 2) if ratio is not None else 0.0
         except Exception as e:
-            logger.error(f"Error calculating S/P ratio: {e}")
-            return 0.0
+            logger.exception(f"Error calculating S/P ratio: {e}")
+            raise
 
     def get_complete_statistics(self):
         """
@@ -1257,5 +1223,5 @@ class CountryClientStatisticsService:
                 "sp_ratio": self._calculate_sp_ratio(),
             }
         except Exception as e:
-            logger.error(f"Error getting complete statistics: {e}")
-            return {}
+            logger.exception(f"Error getting complete statistics: {e}")
+            raise

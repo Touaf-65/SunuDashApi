@@ -68,8 +68,8 @@ class CountryFamilyStatisticsService:
             )
             return result
         except Exception as e:
-            logger.error(f"Error in get_families_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_families_evolution: {e}")
+            raise
 
     def get_spouse_count(self):
         """
@@ -78,8 +78,8 @@ class CountryFamilyStatisticsService:
         try:
             return self.insured_employers.filter(role='spouse').count()
         except Exception as e:
-            logger.error(f"Error in get_spouse_count: {e}")
-            return 0
+            logger.exception(f"Error in get_spouse_count: {e}")
+            raise
 
     def get_child_count(self):
         """
@@ -88,8 +88,8 @@ class CountryFamilyStatisticsService:
         try:
             return self.insured_employers.filter(role='child').count()
         except Exception as e:
-            logger.error(f"Error in get_child_count: {e}")
-            return 0
+            logger.exception(f"Error in get_child_count: {e}")
+            raise
 
     def get_top_families_consumption_series(self, limit=15):
         """
@@ -162,8 +162,8 @@ class CountryFamilyStatisticsService:
             series_multi, categories = format_top_insureds_series(top_families_series, self.periods, self.granularity)
             return series_multi, categories
         except Exception as e:
-            logger.error(f"Error in get_top_families_consumption_series: {e}")
-            return [], []
+            logger.exception(f"Error in get_top_families_consumption_series: {e}")
+            raise
 
     def _calculate_actual_values(self, families_series):
         def safe_last(series):
@@ -220,8 +220,8 @@ class CountryFamilyStatisticsService:
                 'date_end': self.date_end.isoformat(),
             })
         except Exception as e:
-            logger.error(f"Error in get_complete_statistics: {e}")
-            return {} 
+            logger.exception(f"Error in get_complete_statistics: {e}")
+            raise
 
 
 class CountryFamilyListService:
@@ -367,19 +367,8 @@ class CountryFamilyListService:
             }
             
         except Exception as e:
-            logger.error(f"Error in get_families_list: {e}")
-            return {
-                'families': [],
-                'total_families': 0,
-                'country': {
-                    'id': self.country_id,
-                    'name': 'Unknown'
-                },
-                'period': {
-                    'start': self.date_start.isoformat(),
-                    'end': self.date_end.isoformat()
-                }
-            } 
+            logger.exception(f"Error in get_families_list: {e}")
+            raise
 
 
 class ClientFamilyStatisticsService:
@@ -434,8 +423,8 @@ class ClientFamilyStatisticsService:
             )
             return result
         except Exception as e:
-            logger.error(f"Error in get_families_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_families_evolution: {e}")
+            raise
 
     def get_spouse_count(self):
         """
@@ -444,8 +433,8 @@ class ClientFamilyStatisticsService:
         try:
             return self.insured_employers.filter(role='spouse').count()
         except Exception as e:
-            logger.error(f"Error in get_spouse_count: {e}")
-            return 0
+            logger.exception(f"Error in get_spouse_count: {e}")
+            raise
 
     def get_child_count(self):
         """
@@ -454,8 +443,8 @@ class ClientFamilyStatisticsService:
         try:
             return self.insured_employers.filter(role='child').count()
         except Exception as e:
-            logger.error(f"Error in get_child_count: {e}")
-            return 0
+            logger.exception(f"Error in get_child_count: {e}")
+            raise
 
     def get_top_families_consumption_series(self, limit=15):
         """
@@ -527,8 +516,8 @@ class ClientFamilyStatisticsService:
             series_multi, categories = format_top_insureds_series(top_families_series, self.periods, self.granularity)
             return series_multi, categories
         except Exception as e:
-            logger.error(f"Error in get_top_families_consumption_series: {e}")
-            return [], []
+            logger.exception(f"Error in get_top_families_consumption_series: {e}")
+            raise
 
     def _calculate_actual_values(self, families_series):
         def safe_last(series):
@@ -586,8 +575,8 @@ class ClientFamilyStatisticsService:
                 'date_end': self.date_end.isoformat(),
             })
         except Exception as e:
-            logger.error(f"Error in get_complete_statistics: {e}")
-            return {}
+            logger.exception(f"Error in get_complete_statistics: {e}")
+            raise
 
 
 class ClientFamilyListService:
@@ -726,16 +715,5 @@ class ClientFamilyListService:
             }
 
         except Exception as e:
-            logger.error(f"Error in get_families_list: {e}")
-            return {
-                'families': [],
-                'total_families': 0,
-                'client': {
-                    'id': self.client_id,
-                    'name': 'Unknown'
-                },
-                'period': {
-                    'start': self.date_start.isoformat(),
-                    'end': self.date_end.isoformat()
-                }
-            } 
+            logger.exception(f"Error in get_families_list: {e}")
+            raise

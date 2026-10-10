@@ -79,8 +79,8 @@ class CountryPolicyListService:
             return sanitize_float(results)
             
         except Exception as e:
-            logger.error(f"Error generating policies statistics list: {e}")
-            return []
+            logger.exception(f"Error generating policies statistics list: {e}")
+            raise
     
     def _get_policy_statistics(self, policy):
         """
@@ -135,21 +135,8 @@ class CountryPolicyListService:
             }
             
         except Exception as e:
-            logger.error(f"Error calculating statistics for policy {policy.id}: {e}")
-            return {
-                "policy_id": policy.id,
-                "policy_number": policy.policy_number if hasattr(policy, 'policy_number') else f"POL-{policy.id}",
-                "client_id": policy.client.id,
-                "client_name": policy.client.name,
-                "client_contact": policy.client.contact or "",
-                "nb_insured": 0,
-                "total_claimed_amount": 0.0,
-                "total_reimbursed_amount": 0.0,
-                "claims_count": 0,
-                "policy_start_date": None,
-                "policy_end_date": None,
-                "is_active": getattr(policy, 'is_active', True)
-            }
+            logger.exception(f"Error calculating statistics for policy {policy.id}: {e}")
+            raise
     
     def get_policies_statistics_summary(self):
         """
@@ -195,19 +182,8 @@ class CountryPolicyListService:
             })
             
         except Exception as e:
-            logger.error(f"Error generating policies statistics summary: {e}")
-            return {
-                "total_policies": 0,
-                "total_clients": 0,
-                "total_insured": 0,
-                "total_claimed_amount": 0.0,
-                "total_reimbursed_amount": 0.0,
-                "total_claims": 0,
-                "average_claimed_per_policy": 0.0,
-                "average_reimbursed_per_policy": 0.0,
-                "average_insured_per_policy": 0.0,
-                "reimbursement_rate": 0.0
-            }
+            logger.exception(f"Error generating policies statistics summary: {e}")
+            raise
     
     def get_complete_policies_list(self):
         """
@@ -234,16 +210,5 @@ class CountryPolicyListService:
             }
             
         except Exception as e:
-            logger.error(f"Error generating complete policies list: {e}")
-            return {
-                "policies_list": [],
-                "summary": self.get_policies_statistics_summary(),
-                "country": {
-                    "id": self.country_id,
-                    "name": "Unknown"
-                },
-                "date_range": {
-                    "start": self.date_start.isoformat(),
-                    "end": self.date_end.isoformat()
-                }
-            }
+            logger.exception(f"Error generating complete policies list: {e}")
+            raise

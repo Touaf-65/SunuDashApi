@@ -1,9 +1,8 @@
 from django.forms import ValidationError
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-from users.permissions import IsSuperUser, IsGlobalAdmin, IsTerritorialAdmin, IsChefDeptTech, IsResponsableOperateur
+from .access import StatisticsAccess
 from .services.country_statistics import CountryStatisticsService
 from .services.global_statistics import GlobalStatisticsService, CountriesListStatisticsService
 from .services.client_statistics import ClientStatisticsService, ClientStatisticListService, GlobalClientsListService, CountryClientStatisticsService, GlobalClientStatisticsService
@@ -52,7 +51,7 @@ class CountryStatisticsDetailView(APIView):
         - 403 Forbidden: User not authorized or account disabled
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, country_id):
         """
@@ -117,7 +116,7 @@ class ClientStatisticsDetailView(APIView):
         - 403 Forbidden: User not authorized
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
+    permission_classes = [StatisticsAccess]
 
     def get(self, request, country_id):
         """
@@ -217,7 +216,8 @@ class GlobalClientStatisticsDetailView(APIView):
         - 403 Forbidden: User not authorized
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
+    permission_classes = [StatisticsAccess]
+    global_only = True  # vue multi-pays : admin global uniquement
 
     def get(self, request):
         """
@@ -274,7 +274,8 @@ class GlobalStatisticsDetailView(APIView):
         - 403 Forbidden: User not authorized (Global Admin only)
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin]
+    permission_classes = [StatisticsAccess]
+    global_only = True  # vue multi-pays : admin global uniquement
 
     def post(self, request):
         """
@@ -342,7 +343,8 @@ class GlobalCountriesListStatisticsView(APIView):
         - 403 Forbidden: User not authorized (Global Admin only)
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin]
+    permission_classes = [StatisticsAccess]
+    global_only = True  # vue multi-pays : admin global uniquement
 
     def post(self, request):
         """
@@ -405,7 +407,7 @@ class SpecificClientStatisticsDetailView(APIView):
         - 403 Forbidden: User not authorized or account disabled
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, country_id, client_id):
         """
@@ -483,7 +485,7 @@ class CountryClientStatisticsListView(APIView):
         - 403 Forbidden: User not authorized or account disabled
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, country_id):
         """
@@ -560,7 +562,8 @@ class GlobalClientStatisticsListView(APIView):
         - 403 Forbidden: User not authorized or account disabled
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
+    permission_classes = [StatisticsAccess]
+    global_only = True  # vue multi-pays : admin global uniquement
 
     def post(self, request):
         """
@@ -636,7 +639,8 @@ class GlobalPartnerStatisticsView(APIView):
         - 403 Forbidden: User not authorized
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
+    global_only = True  # vue multi-pays : admin global uniquement
     
     def post(self, request):
         """
@@ -715,7 +719,8 @@ class GlobalPartnerListStatisticsView(APIView):
         - 403 Forbidden: User not authorized
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
+    global_only = True  # vue multi-pays : admin global uniquement
     
     def post(self, request):
         """
@@ -775,7 +780,7 @@ class CountryPartnerStatisticsView(APIView):
     """
     API view to get partner statistics for a specific country.
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
     
     def post(self, request, country_id):
         """
@@ -839,7 +844,7 @@ class CountryPartnerListStatisticsView(APIView):
     """
     API view to get a list of all partners for a specific country, sorted by consumption.
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
     
     def post(self, request, country_id):
         """
@@ -900,7 +905,7 @@ class ClientPartnerStatisticsView(APIView):
     """
     API view to get partner statistics for a specific client.
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
     
     def post(self, request, client_id):
         """
@@ -962,7 +967,7 @@ class ClientPartnerListStatisticsView(APIView):
     API view to get a list of all partners where a client's insured members have consumed,
     sorted by consumption.
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
     
     def post(self, request, client_id):
         """
@@ -1023,7 +1028,7 @@ class PolicyPartnerStatisticsView(APIView):
     """
     API view to get partner statistics for a specific policy.
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
     
     def post(self, request, policy_id):
         """
@@ -1085,7 +1090,7 @@ class PolicyPartnerListStatisticsView(APIView):
     API view to get a list of all partners where a policy's insured members have consumed,
     sorted by consumption.
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
     
     def post(self, request, policy_id):
         """
@@ -1147,7 +1152,7 @@ class PartnerStatisticsView(APIView):
     """
     API View for client statistics using ClientStatisticsService.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, partner_id):
         """
@@ -1199,7 +1204,7 @@ class PartnerStatisticsView(APIView):
 
 
 class CountryInsuredStatisticsView(APIView):
-    permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, country_id):
     
@@ -1245,7 +1250,7 @@ class CountryInsuredListStatisticsView(APIView):
     API view to get a list of all partners where a policy's insured members have consumed,
     sorted by consumption.
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
     
     def post(self, request, country_id):
         """
@@ -1304,7 +1309,7 @@ class CountryInsuredListStatisticsView(APIView):
 
 
 class CountryFamilyStatisticsView(APIView):
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, country_id):
         user = request.user
@@ -1366,7 +1371,7 @@ class CountryFamilyListView(APIView):
         - 403 Forbidden: User not authorized or account disabled
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, country_id):
         """
@@ -1441,7 +1446,7 @@ class ClientFamilyStatisticsView(APIView):
         - 403 Forbidden: User not authorized or account disabled
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, client_id):
         """
@@ -1516,7 +1521,7 @@ class ClientFamilyListView(APIView):
         - 403 Forbidden: User not authorized or account disabled
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsSuperUser | IsGlobalAdmin | IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, client_id):
         """
@@ -1582,7 +1587,8 @@ class GlobalPolicyStatisticsView(APIView):
         - 403 Forbidden: User not authorized
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
+    permission_classes = [StatisticsAccess]
+    global_only = True  # vue multi-pays : admin global uniquement
 
     def get(self, request):
         """
@@ -1638,7 +1644,8 @@ class GlobalPolicyStatisticsDetailView(APIView):
         - 403 Forbidden: User not authorized (Global Admin only)
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin]
+    permission_classes = [StatisticsAccess]
+    global_only = True  # vue multi-pays : admin global uniquement
     
     def post(self, request):
         """
@@ -1703,7 +1710,7 @@ class CountryPolicyStatisticsView(APIView):
         - 403 Forbidden: User not authorized
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin | IsTerritorialAdmin | IsChefDeptTech]
+    permission_classes = [StatisticsAccess]
 
     def get(self, request, country_id):
         """
@@ -1720,13 +1727,7 @@ class CountryPolicyStatisticsView(APIView):
             Response: Formatted country policy statistics for dashboard cards
         """
         try:
-            # Check if user is territorial admin and has access to this country
-            if hasattr(request.user, 'is_territorial_admin') and getattr(request.user, 'is_territorial_admin', False):
-                if not hasattr(request.user, 'country') or request.user.country.id != int(country_id):
-                    return Response(
-                        {"error": "Vous n'avez pas accès à ce pays."},
-                        status=status.HTTP_403_FORBIDDEN
-                    )
+            # Accès au pays : contrôlé par StatisticsAccess
             
             # Initialize the service
             statistics_service = CountryPolicyStatisticsService(country_id)
@@ -1766,14 +1767,7 @@ class CountryPolicyStatisticsView(APIView):
                     {"error": "Votre compte est désactivé. Vous ne pouvez pas effectuer cette opération."},
                     status=status.HTTP_403_FORBIDDEN
                 )
-            
-            # Check if user is territorial admin and has access to this country
-            if hasattr(request.user, 'is_territorial_admin') and getattr(request.user, 'is_territorial_admin', False):
-                if not hasattr(request.user, 'country') or request.user.country.id != int(country_id):
-                    return Response(
-                        {"error": "Vous n'avez pas accès à ce pays."},
-                        status=status.HTTP_403_FORBIDDEN
-                    )
+            # Accès au pays : contrôlé par StatisticsAccess
             
             date_start = request.data.get('date_start')
             date_end = request.data.get('date_end')
@@ -1828,7 +1822,8 @@ class GlobalPolicyListView(APIView):
         - 403 Forbidden: User not authorized (Global Admin only)
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsGlobalAdmin]
+    permission_classes = [StatisticsAccess]
+    global_only = True  # vue multi-pays : admin global uniquement
 
     def get(self, request):
         """
@@ -1965,7 +1960,7 @@ class CountryPolicyListView(APIView):
         - 403 Forbidden: User not authorized (Territorial Admin only)
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated, IsTerritorialAdmin]
+    permission_classes = [StatisticsAccess]
 
     def get(self, request, country_id=None):
         """
@@ -1994,7 +1989,8 @@ class CountryPolicyListView(APIView):
             service = CountryPolicyListService(
                 user=request.user,
                 date_start_str=date_start,
-                date_end_str=date_end
+                date_end_str=date_end,
+                country_id=country_id
             )
             
             return Response({
@@ -2057,7 +2053,8 @@ class CountryPolicyListView(APIView):
                 user=request.user,
                 date_start_str=date_start,
                 date_end_str=date_end,
-                client_id=int(client_id) if client_id else None
+                client_id=int(client_id) if client_id else None,
+                country_id=country_id
             )
             
             complete_data = service.get_complete_data()
@@ -2101,7 +2098,7 @@ class SpecificPolicyStatisticsDetailView(APIView):
         - 403 Forbidden: User not authorized or account disabled
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, policy_id):
         """
@@ -2179,7 +2176,7 @@ class ClientPolicyStatisticsView(APIView):
         - 403 Forbidden: User not authorized or account disabled
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, client_id, policy_id):
         """
@@ -2264,7 +2261,7 @@ class ClientPolicyListStatisticsView(APIView):
         - 403 Forbidden: User not authorized or account disabled
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, client_id):
         """
@@ -2342,7 +2339,7 @@ class PolicyInsuredStatisticsView(APIView):
         - 403 Forbidden: User not authorized or account disabled
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, policy_id):
         """
@@ -2419,7 +2416,7 @@ class PolicyInsuredListView(APIView):
         - 403 Forbidden: User not authorized or account disabled
         - 500 Internal Server Error: System error during processing
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [StatisticsAccess]
 
     def post(self, request, policy_id):
         """

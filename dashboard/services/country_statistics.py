@@ -86,8 +86,8 @@ class CountryStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_clients_timeseries: {e}")
-            return []
+            logger.exception(f"Error in get_clients_timeseries: {e}")
+            raise
     
     def get_prime_timeseries(self):
         """
@@ -97,8 +97,8 @@ class CountryStatisticsService:
             periods = generate_periods(self.date_start, self.date_end, self.granularity)
             return premium_series(self.client_ids, periods, self.date_end)
         except Exception as e:
-            logger.error(f"Error in get_prime_timeseries: {e}")
-            return []
+            logger.exception(f"Error in get_prime_timeseries: {e}")
+            raise
     
     def get_reimbursed_amount_timeseries(self):
         """
@@ -118,8 +118,8 @@ class CountryStatisticsService:
                 point['value'] = float(point['value'] or 0)       
             return result
         except Exception as e:
-            logger.error(f"Error in get_reimbursed_amount_timeseries: {e}")
-            return []
+            logger.exception(f"Error in get_reimbursed_amount_timeseries: {e}")
+            raise
     
     def get_claimed_amount_timeseries(self):
         """
@@ -140,8 +140,8 @@ class CountryStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_claimed_amount_timeseries: {e}")
-            return []
+            logger.exception(f"Error in get_claimed_amount_timeseries: {e}")
+            raise
     
     def get_partners_timeseries(self):
         """
@@ -161,8 +161,8 @@ class CountryStatisticsService:
                 point['value'] = int(point['value'] or 0)
             return result
         except Exception as e:
-            logger.error(f"Error in get_partners_timeseries: {e}")
-            return []
+            logger.exception(f"Error in get_partners_timeseries: {e}")
+            raise
     
     def get_sp_ratio_timeseries(self, prime_series, reimbursed_series):
         """
@@ -211,8 +211,8 @@ class CountryStatisticsService:
                 point['value'] = int(point['value'] or 0)
             return result
         except Exception as e:
-            logger.error(f"Error in get_primary_insured_timeseries: {e}")
-            return []
+            logger.exception(f"Error in get_primary_insured_timeseries: {e}")
+            raise
 
     
     def get_total_insured_timeseries(self):
@@ -237,8 +237,8 @@ class CountryStatisticsService:
                 point['value'] = int(point['value'] or 0)
             return result
         except Exception as e:
-            logger.error(f"Error in get_total_insured_timeseries: {e}")
-            return []
+            logger.exception(f"Error in get_total_insured_timeseries: {e}")
+            raise
     
     def get_insured_by_role_timeseries(self):
         """
@@ -267,8 +267,8 @@ class CountryStatisticsService:
                     point['value'] = int(point['value'] or 0)
                 insured_by_role[role] = series
             except Exception as e:
-                logger.error(f"Error in get_insured_by_role_timeseries for role {role}: {e}")
-                insured_by_role[role] = []
+                logger.exception(f"Error in get_insured_by_role_timeseries for role {role}: {e}")
+                raise
         return insured_by_role
     
     def get_top_clients_consumption(self, limit=5):

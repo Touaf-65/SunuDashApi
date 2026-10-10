@@ -75,8 +75,8 @@ class CountryInsuredStatisticsService:
             )
             return result
         except Exception as e:
-            logger.error(f"Error in get_consuming_insured_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_consuming_insured_evolution: {e}")
+            raise
 
     def get_insured_by_role_evolution(self, role):
         try:
@@ -89,8 +89,8 @@ class CountryInsuredStatisticsService:
             )
             return result
         except Exception as e:
-            logger.error(f"Error in get_insured_by_role_evolution for role {role}: {e}")
-            return []
+            logger.exception(f"Error in get_insured_by_role_evolution for role {role}: {e}")
+            raise
 
     def get_consumption_by_role(self):
         try:
@@ -102,8 +102,8 @@ class CountryInsuredStatisticsService:
                 consumption_by_role[role] = value
             return consumption_by_role
         except Exception as e:
-            logger.error(f"Error in get_consumption_by_role: {e}")
-            return {}
+            logger.exception(f"Error in get_consumption_by_role: {e}")
+            raise
 
     def get_consumption_by_role_timeseries(self):
         try:
@@ -122,8 +122,8 @@ class CountryInsuredStatisticsService:
                 consumption_by_role[role] = result
             return consumption_by_role
         except Exception as e:
-            logger.error(f"Error in get_consumption_by_role_timeseries: {e}")
-            return {}
+            logger.exception(f"Error in get_consumption_by_role_timeseries: {e}")
+            raise
 
     def get_top_insureds_consumption_series(self, limit=10):
         try:
@@ -157,8 +157,8 @@ class CountryInsuredStatisticsService:
             series_multi, categories = format_top_insureds_series(top_insureds_series, periods, self.granularity)
             return series_multi, categories
         except Exception as e:
-            logger.error(f"Error in get_top_insureds_consumption_series: {e}")
-            return [], []
+            logger.exception(f"Error in get_top_insureds_consumption_series: {e}")
+            raise
 
     def _calculate_actual_values(self, consuming_series, primary_series, spouse_series, child_series):
         def safe_last(series):
@@ -240,8 +240,8 @@ class CountryInsuredStatisticsService:
                 'date_end': self.date_end.isoformat(),
             })
         except Exception as e:
-            logger.error(f"Error in get_complete_statistics: {e}")
-            return {}
+            logger.exception(f"Error in get_complete_statistics: {e}")
+            raise
 
 
 class CountryInsuredListService:
@@ -311,8 +311,8 @@ class CountryInsuredListService:
             
             return insureds_list
         except Exception as e:
-            logger.error(f"Error in get_insureds_list: {e}")
-            return []
+            logger.exception(f"Error in get_insureds_list: {e}")
+            raise
 
     def get_complete_insureds_list(self):
         """
@@ -330,15 +330,8 @@ class CountryInsuredListService:
                 }
             }
         except Exception as e:
-            logger.error(f"Error in get_complete_insureds_list: {e}")
-            return {
-                'insureds_list': [],
-                'total_count': 0,
-                'country': {
-                    'id': self.country_id,
-                    'name': 'Unknown'
-                }
-            }
+            logger.exception(f"Error in get_complete_insureds_list: {e}")
+            raise
             
 
 class PolicyInsuredStatisticsService:
@@ -403,8 +396,8 @@ class PolicyInsuredStatisticsService:
             
             return role_distribution
         except Exception as e:
-            logger.error(f"Error in get_insured_role_distribution: {e}")
-            return {}
+            logger.exception(f"Error in get_insured_role_distribution: {e}")
+            raise
 
     def get_insured_evolution_timeline(self):
         """
@@ -423,8 +416,8 @@ class PolicyInsuredStatisticsService:
             )
             return result
         except Exception as e:
-            logger.error(f"Error in get_insured_evolution_timeline: {e}")
-            return []
+            logger.exception(f"Error in get_insured_evolution_timeline: {e}")
+            raise
 
     def get_insured_consumption_by_role_series(self):
         """
@@ -469,8 +462,8 @@ class PolicyInsuredStatisticsService:
             
             return consumption_by_role
         except Exception as e:
-            logger.error(f"Error in get_insured_consumption_by_role_series: {e}")
-            return {}
+            logger.exception(f"Error in get_insured_consumption_by_role_series: {e}")
+            raise
 
     def get_top_insureds_consumption_ranking(self, limit=10):
         """
@@ -513,8 +506,8 @@ class PolicyInsuredStatisticsService:
             
             return top_insureds
         except Exception as e:
-            logger.error(f"Error in get_top_insureds_consumption_ranking: {e}")
-            return []
+            logger.exception(f"Error in get_top_insureds_consumption_ranking: {e}")
+            raise
 
     def get_insured_consumption_patterns(self):
         """
@@ -563,8 +556,8 @@ class PolicyInsuredStatisticsService:
             
             return patterns
         except Exception as e:
-            logger.error(f"Error in get_insured_consumption_patterns: {e}")
-            return {}
+            logger.exception(f"Error in get_insured_consumption_patterns: {e}")
+            raise
 
     def get_complete_statistics(self):
         """
@@ -643,8 +636,8 @@ class PolicyInsuredStatisticsService:
             })
             
         except Exception as e:
-            logger.error(f"Error in get_complete_statistics: {e}")
-            return {}
+            logger.exception(f"Error in get_complete_statistics: {e}")
+            raise
 
     def get_complete_statistics(self):
         """
@@ -723,8 +716,8 @@ class PolicyInsuredStatisticsService:
             })
             
         except Exception as e:
-            logger.error(f"Error in get_complete_statistics: {e}")
-            return {}
+            logger.exception(f"Error in get_complete_statistics: {e}")
+            raise
 
 
 class PolicyInsuredListService:
@@ -841,8 +834,8 @@ class PolicyInsuredListService:
             return insureds_list
             
         except Exception as e:
-            logger.error(f"Error in get_insureds_detailed_list: {e}")
-            return []
+            logger.exception(f"Error in get_insureds_detailed_list: {e}")
+            raise
 
     def get_complete_insureds_list(self):
         """
@@ -893,12 +886,6 @@ class PolicyInsuredListService:
             }
             
         except Exception as e:
-            logger.error(f"Error in get_complete_insureds_list: {e}")
-            return {
-                'insureds_list': [],
-                'summary_statistics': {},
-                'policy': {},
-                'date_start': None,
-                'date_end': None
-            }
+            logger.exception(f"Error in get_complete_insureds_list: {e}")
+            raise
             

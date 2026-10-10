@@ -119,8 +119,8 @@ class ClientPolicyStatisticsService:
             
             return consumption_series
         except Exception as e:
-            logger.error(f"Error in get_consumption_series: {e}")
-            return []
+            logger.exception(f"Error in get_consumption_series: {e}")
+            raise
     
     def get_nb_primary_series(self):
         """
@@ -146,8 +146,8 @@ class ClientPolicyStatisticsService:
             
             return nb_primary_series
         except Exception as e:
-            logger.error(f"Error in get_nb_primary_series: {e}")
-            return []
+            logger.exception(f"Error in get_nb_primary_series: {e}")
+            raise
     
     def get_nb_total_series(self):
         """
@@ -172,8 +172,8 @@ class ClientPolicyStatisticsService:
             
             return nb_total_series
         except Exception as e:
-            logger.error(f"Error in get_nb_total_series: {e}")
-            return []
+            logger.exception(f"Error in get_nb_total_series: {e}")
+            raise
     
     def generate_statistics(self):
         """
@@ -232,8 +232,8 @@ class ClientPolicyStatisticsService:
             }
             
         except Exception as e:
-            logger.error(f"Error generating policy statistics: {e}")
-            return {}
+            logger.exception(f"Error generating policy statistics: {e}")
+            raise
     
     def _get_nb_assures_par_type_series(self):
         """
@@ -278,8 +278,8 @@ class ClientPolicyStatisticsService:
             
             return nb_assures_par_type_series
         except Exception as e:
-            logger.error(f"Error in _get_nb_assures_par_type_series: {e}")
-            return []
+            logger.exception(f"Error in _get_nb_assures_par_type_series: {e}")
+            raise
     
     def _get_top5_familles_conso_series(self):
         """
@@ -344,8 +344,8 @@ class ClientPolicyStatisticsService:
             
             return top5_familles_conso_series, top5_familles_labels
         except Exception as e:
-            logger.error(f"Error in _get_top5_familles_conso_series: {e}")
-            return [], []
+            logger.exception(f"Error in _get_top5_familles_conso_series: {e}")
+            raise
     
     def _get_top5_categories_actes_series(self):
         """
@@ -388,8 +388,8 @@ class ClientPolicyStatisticsService:
             
             return top5_categories_actes_series, top5_categories_labels
         except Exception as e:
-            logger.error(f"Error in _get_top5_categories_actes_series: {e}")
-            return [], []
+            logger.exception(f"Error in _get_top5_categories_actes_series: {e}")
+            raise
     
     def _get_top5_partners_conso_series(self):
         """
@@ -445,8 +445,8 @@ class ClientPolicyStatisticsService:
             
             return partner_consumption_series, top5_partners_labels, top_partners_table
         except Exception as e:
-            logger.error(f"Error in _get_top5_partners_conso_series: {e}")
-            return [], [], []
+            logger.exception(f"Error in _get_top5_partners_conso_series: {e}")
+            raise
     
     def _get_consommation_percentages_client_polices(self):
         """
@@ -481,8 +481,8 @@ class ClientPolicyStatisticsService:
             else:
                 return [0, 0]
         except Exception as e:
-            logger.error(f"Error in _get_consommation_percentages_client_polices: {e}")
-            return [0, 0]
+            logger.exception(f"Error in _get_consommation_percentages_client_polices: {e}")
+            raise
     
     def _get_date_label(self, dt):
         """
@@ -601,8 +601,8 @@ class ClientPolicyStatisticsService:
             }
             
         except Exception as e:
-            logger.error(f"Error generating policy statistics: {e}")
-            return {}
+            logger.exception(f"Error generating policy statistics: {e}")
+            raise
 
 
 
@@ -693,8 +693,8 @@ class ClientPolicyListService:
                 role_totals['child']
             ]
         except Exception as e:
-            logger.error(f"Error in _get_role_consumption_share: {e}")
-            return [0, 0, 0]
+            logger.exception(f"Error in _get_role_consumption_share: {e}")
+            raise
     
     def _get_policy_consumption_series(self):
         """
@@ -734,8 +734,8 @@ class ClientPolicyListService:
             
             return policy_consumption_series
         except Exception as e:
-            logger.error(f"Error in _get_policy_consumption_series: {e}")
-            return []
+            logger.exception(f"Error in _get_policy_consumption_series: {e}")
+            raise
     
     def _get_policies_table(self):
         """
@@ -778,8 +778,8 @@ class ClientPolicyListService:
             
             return policies_table
         except Exception as e:
-            logger.error(f"Error in _get_policies_table: {e}")
-            return []
+            logger.exception(f"Error in _get_policies_table: {e}")
+            raise
     
     def _get_consistency_warning(self, role_consumption_share, policies_table):
         """
@@ -806,8 +806,8 @@ class ClientPolicyListService:
                     }
             return None
         except Exception as e:
-            logger.error(f"Error in _get_consistency_warning: {e}")
-            return None
+            logger.exception(f"Error in _get_consistency_warning: {e}")
+            raise
     
     def _get_date_label(self, dt):
         """
@@ -870,8 +870,8 @@ class ClientPolicyListService:
             return sanitize_float(response_data)
             
         except Exception as e:
-            logger.error(f"Error generating policies statistics: {e}")
-            return {}
+            logger.exception(f"Error generating policies statistics: {e}")
+            raise
 
 
 
@@ -886,18 +886,20 @@ class CountryPolicyListService:
     - No country selection (automatically restricted to admin's country)
     """
     
-    def __init__(self, user, date_start_str, date_end_str, client_id=None):
+    def __init__(self, user, date_start_str, date_end_str, client_id=None, country_id=None):
         """
         Initialize the service with user context and filters.
         
         Args:
-            user: Current user (CustomUser instance) - must be territorial admin
+            user: Current user (CustomUser instance)
             date_start_str (str): Start date in YYYY-MM-DD format
             date_end_str (str): End date in YYYY-MM-DD format
             client_id (int, optional): Filter by client ID
+            country_id (int, optional): Country from the URL (defaults to the user's country)
         """
         try:
             self.user = user
+            self.requested_country_id = int(country_id) if country_id else None
             self.client_id = int(client_id) if client_id else None
             self.date_start, self.date_end = parse_date_range(date_start_str, date_end_str)
             self._setup_user_permissions()
@@ -908,32 +910,15 @@ class CountryPolicyListService:
     
     def _setup_user_permissions(self):
         """
-        Setup user permissions - validates that user is territorial admin and gets their country.
+        Pays des polices : celui de l'URL (accès déjà contrôlé par dashboard.access.StatisticsAccess),
+        à défaut celui de l'utilisateur.
         """
-        try:
-            self.is_territorial_admin = (
-                hasattr(self.user, 'is_territorial_admin') and 
-                getattr(self.user, 'is_territorial_admin', False)
-            ) or (
-                not self.user.is_superuser and 
-                not getattr(self.user, 'is_global_admin', False)
-            )
-            
-            if not self.is_territorial_admin:
-                raise ValidationError("Ce service est réservé aux administrateurs territoriaux uniquement.")
-            
-            # Get the territorial admin's assigned country
-            if hasattr(self.user, 'country') and self.user.country:
-                self.assigned_country = self.user.country
-                self.country_id = self.assigned_country.id
-                logger.info(f"Territorial admin {self.user.email} - Access to country {self.assigned_country.name}")
-            else:
-                raise ValidationError("Aucun pays n'est assigné à cet administrateur territorial.")
-            
-        except Exception as e:
-            logger.error(f"Error setting up user permissions: {e}")
-            raise ValidationError(f"Error setting up permissions: {e}")
-    
+        country_id = self.requested_country_id or getattr(self.user, 'country_id', None)
+        self.assigned_country = Country.objects.filter(id=country_id).first() if country_id else None
+        if not self.assigned_country:
+            raise ValidationError("Aucun pays n'est indiqué pour cette liste de polices.")
+        self.country_id = self.assigned_country.id
+
     def _setup_base_filters(self):
         """
         Set up base querysets for policies - territorial admin sees only policies from their country.
@@ -992,8 +977,8 @@ class CountryPolicyListService:
             return clients
             
         except Exception as e:
-            logger.error(f"Error getting available clients: {e}")
-            return []
+            logger.exception(f"Error getting available clients: {e}")
+            raise
     
     def get_policies_list(self):
         """
@@ -1018,8 +1003,8 @@ class CountryPolicyListService:
             return sanitize_float(results)
             
         except Exception as e:
-            logger.error(f"Error generating policies list: {e}")
-            return []
+            logger.exception(f"Error generating policies list: {e}")
+            raise
     
     def _get_policy_statistics(self, policy):
         """
@@ -1085,32 +1070,8 @@ class CountryPolicyListService:
             }
             
         except Exception as e:
-            logger.error(f"Error calculating statistics for policy {policy.id}: {e}")
-            return {
-                "policy_id": policy.id,
-                "policy_number": getattr(policy, 'policy_number', f"POL-{policy.id}"),
-                "client": {
-                    "id": policy.client.id,
-                    "name": policy.client.name,
-                    "contact": policy.client.contact or ""
-                },
-                "insured_statistics": {
-                    "total_insured": 0,
-                    "primary_insured": 0,
-                    "dependents": 0
-                },
-                "financial_statistics": {
-                    "total_claimed_amount": 0.0,
-                    "total_reimbursed_amount": 0.0,
-                    "reimbursement_rate": 0.0
-                },
-                "claims_count": 0,
-                "policy_dates": {
-                    "start_date": None,
-                    "end_date": None
-                },
-                "is_active": getattr(policy, 'is_active', True)
-            }
+            logger.exception(f"Error calculating statistics for policy {policy.id}: {e}")
+            raise
     
     def get_summary_statistics(self):
         """
@@ -1170,18 +1131,8 @@ class CountryPolicyListService:
             })
             
         except Exception as e:
-            logger.error(f"Error generating summary statistics: {e}")
-            return {
-                "total_policies": 0,
-                "total_clients": 0,
-                "total_insured": 0,
-                "total_claimed_amount": 0.0,
-                "total_reimbursed_amount": 0.0,
-                "total_claims": 0,
-                "average_claimed_per_policy": 0.0,
-                "average_reimbursed_per_policy": 0.0,
-                "overall_reimbursement_rate": 0.0
-            }
+            logger.exception(f"Error generating summary statistics: {e}")
+            raise
     
     def get_complete_data(self):
         """
@@ -1214,28 +1165,8 @@ class CountryPolicyListService:
             }
             
         except Exception as e:
-            logger.error(f"Error generating complete data: {e}")
-            return {
-                "policies": [],
-                "summary": self.get_summary_statistics(),
-                "filter_options": {
-                    "clients": []
-                },
-                "applied_filters": {
-                    "client_id": self.client_id,
-                    "date_start": self.date_start.isoformat(),
-                    "date_end": self.date_end.isoformat()
-                },
-                "country_context": {
-                    "id": self.country_id if hasattr(self, 'country_id') else None,
-                    "name": "Unknown",
-                    "code": ""
-                },
-                "user_context": {
-                    "is_territorial_admin": True,
-                    "assigned_country": "Unknown"
-                }
-            }
+            logger.exception(f"Error generating complete data: {e}")
+            raise
 
 
 
@@ -1342,8 +1273,8 @@ class GlobalPolicyListService:
             return countries
             
         except Exception as e:
-            logger.error(f"Error getting available countries: {e}")
-            return []
+            logger.exception(f"Error getting available countries: {e}")
+            raise
     
     def get_available_clients(self, country_id=None):
         """
@@ -1381,8 +1312,8 @@ class GlobalPolicyListService:
             return clients
             
         except Exception as e:
-            logger.error(f"Error getting available clients: {e}")
-            return []
+            logger.exception(f"Error getting available clients: {e}")
+            raise
     
     def get_policies_list(self):
         """
@@ -1404,8 +1335,8 @@ class GlobalPolicyListService:
             return sanitize_float(results)
             
         except Exception as e:
-            logger.error(f"Error generating policies list: {e}")
-            return []
+            logger.exception(f"Error generating policies list: {e}")
+            raise
     
     def _get_policy_statistics(self, policy):
         """
@@ -1475,36 +1406,8 @@ class GlobalPolicyListService:
             }
             
         except Exception as e:
-            logger.error(f"Error calculating statistics for policy {policy.id}: {e}")
-            return {
-                "policy_id": policy.id,
-                "policy_number": getattr(policy, 'policy_number', f"POL-{policy.id}"),
-                "client": {
-                    "id": policy.client.id,
-                    "name": policy.client.name,
-                    "contact": policy.client.contact or "",
-                    "country": {
-                        "id": policy.country_id,
-                        "name": policy.country.name
-                    }
-                },
-                "insured_statistics": {
-                    "total_insured": 0,
-                    "primary_insured": 0,
-                    "dependents": 0
-                },
-                "financial_statistics": {
-                    "total_claimed_amount": 0.0,
-                    "total_reimbursed_amount": 0.0,
-                    "reimbursement_rate": 0.0
-                },
-                "claims_count": 0,
-                "policy_dates": {
-                    "start_date": None,
-                    "end_date": None
-                },
-                "is_active": getattr(policy, 'is_active', True)
-            }
+            logger.exception(f"Error calculating statistics for policy {policy.id}: {e}")
+            raise
     
     def get_summary_statistics(self):
         """
@@ -1570,19 +1473,8 @@ class GlobalPolicyListService:
             })
             
         except Exception as e:
-            logger.error(f"Error generating summary statistics: {e}")
-            return {
-                "total_policies": 0,
-                "total_clients": 0,
-                "total_countries": 0,
-                "total_insured": 0,
-                "total_claimed_amount": 0.0,
-                "total_reimbursed_amount": 0.0,
-                "total_claims": 0,
-                "average_claimed_per_policy": 0.0,
-                "average_reimbursed_per_policy": 0.0,
-                "overall_reimbursement_rate": 0.0
-            }
+            logger.exception(f"Error generating summary statistics: {e}")
+            raise
     
     def get_complete_data(self):
         """
@@ -1613,25 +1505,8 @@ class GlobalPolicyListService:
             }
             
         except Exception as e:
-            logger.error(f"Error generating complete data: {e}")
-            return {
-                "policies": [],
-                "summary": self.get_summary_statistics(),
-                "filter_options": {
-                    "countries": [],
-                    "clients": []
-                },
-                "applied_filters": {
-                    "country_id": self.country_id,
-                    "client_id": self.client_id,
-                    "date_start": self.date_start.isoformat(),
-                    "date_end": self.date_end.isoformat()
-                },
-                "user_context": {
-                    "is_global_admin": self.is_global_admin,
-                    "accessible_countries_count": 0
-                }
-            }
+            logger.exception(f"Error generating complete data: {e}")
+            raise
 
 
 
@@ -1693,8 +1568,8 @@ class GlobalPolicyStatisticsService:
         try:
             return self.policies.count()
         except Exception as e:
-            logger.error(f"Error getting total policies count: {e}")
-            return 0
+            logger.exception(f"Error getting total policies count: {e}")
+            raise
 
     def get_clients_count(self):
         """
@@ -1706,8 +1581,8 @@ class GlobalPolicyStatisticsService:
         try:
             return self.clients.count()
         except Exception as e:
-            logger.error(f"Error getting clients count: {e}")
-            return 0
+            logger.exception(f"Error getting clients count: {e}")
+            raise
 
     def get_total_premium_amount(self):
         """
@@ -1720,8 +1595,8 @@ class GlobalPolicyStatisticsService:
             # Primes en vigueur aujourd'hui (Premium, historisées par période)
             return current_summary(self.clients.values_list('id', flat=True), self.claims)['premium']
         except Exception as e:
-            logger.error(f"Error getting total premium amount: {e}")
-            return 0.0
+            logger.exception(f"Error getting total premium amount: {e}")
+            raise
 
     def get_total_claimed_amount(self):
         """
@@ -1734,8 +1609,8 @@ class GlobalPolicyStatisticsService:
             total = self.invoices.aggregate(total=Sum('claimed_amount'))['total']
             return float(total or 0)
         except Exception as e:
-            logger.error(f"Error getting total claimed amount: {e}")
-            return 0.0
+            logger.exception(f"Error getting total claimed amount: {e}")
+            raise
 
     def _calculate_sp_ratio(self):
         """
@@ -1749,8 +1624,8 @@ class GlobalPolicyStatisticsService:
             ratio = current_summary(self.clients.values_list('id', flat=True), self.claims)['ratio']
             return round(ratio * 100, 2) if ratio is not None else 0.0
         except Exception as e:
-            logger.error(f"Error calculating S/P ratio: {e}")
-            return 0.0
+            logger.exception(f"Error calculating S/P ratio: {e}")
+            raise
 
     def get_complete_statistics(self):
         """
@@ -1768,8 +1643,8 @@ class GlobalPolicyStatisticsService:
                 "sp_ratio": self._calculate_sp_ratio(),
             }
         except Exception as e:
-            logger.error(f"Error getting complete statistics: {e}")
-            return {}
+            logger.exception(f"Error getting complete statistics: {e}")
+            raise
 
 
 class CountryPolicyStatisticsService:
@@ -1832,8 +1707,8 @@ class CountryPolicyStatisticsService:
         try:
             return self.policies.count()
         except Exception as e:
-            logger.error(f"Error getting total policies count: {e}")
-            return 0
+            logger.exception(f"Error getting total policies count: {e}")
+            raise
 
     def get_clients_count(self):
         """
@@ -1845,8 +1720,8 @@ class CountryPolicyStatisticsService:
         try:
             return self.clients.count()
         except Exception as e:
-            logger.error(f"Error getting clients count: {e}")
-            return 0
+            logger.exception(f"Error getting clients count: {e}")
+            raise
 
     def get_total_premium_amount(self):
         """
@@ -1859,8 +1734,8 @@ class CountryPolicyStatisticsService:
             # Primes en vigueur aujourd'hui (Premium, historisées par période)
             return current_summary(self.clients.values_list('id', flat=True), self.claims)['premium']
         except Exception as e:
-            logger.error(f"Error getting total premium amount: {e}")
-            return 0.0
+            logger.exception(f"Error getting total premium amount: {e}")
+            raise
 
     def get_total_claimed_amount(self):
         """
@@ -1873,8 +1748,8 @@ class CountryPolicyStatisticsService:
             total = self.invoices.aggregate(total=Sum('claimed_amount'))['total']
             return float(total or 0)
         except Exception as e:
-            logger.error(f"Error getting total claimed amount: {e}")
-            return 0.0
+            logger.exception(f"Error getting total claimed amount: {e}")
+            raise
 
     def _calculate_sp_ratio(self):
         """
@@ -1888,8 +1763,8 @@ class CountryPolicyStatisticsService:
             ratio = current_summary(self.clients.values_list('id', flat=True), self.claims)['ratio']
             return round(ratio * 100, 2) if ratio is not None else 0.0
         except Exception as e:
-            logger.error(f"Error calculating S/P ratio: {e}")
-            return 0.0
+            logger.exception(f"Error calculating S/P ratio: {e}")
+            raise
 
     def get_complete_statistics(self):
         """
@@ -1907,8 +1782,8 @@ class CountryPolicyStatisticsService:
                 "sp_ratio": self._calculate_sp_ratio(),
             }
         except Exception as e:
-            logger.error(f"Error getting complete statistics: {e}")
-            return {}
+            logger.exception(f"Error getting complete statistics: {e}")
+            raise
 
 
 class GlobalPolicyStatisticsDetailService:
@@ -1977,8 +1852,8 @@ class GlobalPolicyStatisticsDetailService:
         try:
             return self.clients.count()
         except Exception as e:
-            logger.error(f"Error getting total clients count: {e}")
-            return 0
+            logger.exception(f"Error getting total clients count: {e}")
+            raise
     
     def get_total_policies_count(self):
         """
@@ -1990,8 +1865,8 @@ class GlobalPolicyStatisticsDetailService:
         try:
             return self.policies.count()
         except Exception as e:
-            logger.error(f"Error getting total policies count: {e}")
-            return 0
+            logger.exception(f"Error getting total policies count: {e}")
+            raise
     
     def get_total_insured_count(self):
         """
@@ -2003,8 +1878,8 @@ class GlobalPolicyStatisticsDetailService:
         try:
             return self.insured_employers.values('insured').distinct().count()
         except Exception as e:
-            logger.error(f"Error getting total insured count: {e}")
-            return 0
+            logger.exception(f"Error getting total insured count: {e}")
+            raise
     
     def get_total_claims_count(self):
         """
@@ -2016,8 +1891,8 @@ class GlobalPolicyStatisticsDetailService:
         try:
             return self.claims.count()
         except Exception as e:
-            logger.error(f"Error getting total claims count: {e}")
-            return 0
+            logger.exception(f"Error getting total claims count: {e}")
+            raise
     
     def get_complete_statistics(self):
         """
@@ -2039,18 +1914,8 @@ class GlobalPolicyStatisticsDetailService:
                 "scope": "global"
             }
         except Exception as e:
-            logger.error(f"Error getting complete statistics: {e}")
-            return {
-                "total_clients": 0,
-                "total_policies": 0,
-                "total_insured": 0,
-                "total_claims": 0,
-                "date_range": {
-                    "start": self.date_start.isoformat() if self.date_start else None,
-                    "end": self.date_end.isoformat() if self.date_end else None
-                },
-                "scope": "global"
-            }
+            logger.exception(f"Error getting complete statistics: {e}")
+            raise
 
 
 class CountryPolicyStatisticsDetailService:
@@ -2127,8 +1992,8 @@ class CountryPolicyStatisticsDetailService:
         try:
             return self.clients.count()
         except Exception as e:
-            logger.error(f"Error getting total clients count: {e}")
-            return 0
+            logger.exception(f"Error getting total clients count: {e}")
+            raise
     
     def get_total_policies_count(self):
         """
@@ -2140,8 +2005,8 @@ class CountryPolicyStatisticsDetailService:
         try:
             return self.policies.count()
         except Exception as e:
-            logger.error(f"Error getting total policies count: {e}")
-            return 0
+            logger.exception(f"Error getting total policies count: {e}")
+            raise
     
     def get_total_insured_count(self):
         """
@@ -2153,8 +2018,8 @@ class CountryPolicyStatisticsDetailService:
         try:
             return self.insured_employers.values('insured').distinct().count()
         except Exception as e:
-            logger.error(f"Error getting total insured count: {e}")
-            return 0
+            logger.exception(f"Error getting total insured count: {e}")
+            raise
     
     def get_total_claims_count(self):
         """
@@ -2166,8 +2031,8 @@ class CountryPolicyStatisticsDetailService:
         try:
             return self.claims.count()
         except Exception as e:
-            logger.error(f"Error getting total claims count: {e}")
-            return 0
+            logger.exception(f"Error getting total claims count: {e}")
+            raise
     
     def get_complete_statistics(self):
         """
@@ -2194,23 +2059,8 @@ class CountryPolicyStatisticsDetailService:
                 "scope": "country"
             }
         except Exception as e:
-            logger.error(f"Error getting complete statistics: {e}")
-            return {
-                "total_clients": 0,
-                "total_policies": 0,
-                "total_insured": 0,
-                "total_claims": 0,
-                "country": {
-                    "id": self.country_id,
-                    "name": "Unknown",
-                    "code": ""
-                },
-                "date_range": {
-                    "start": self.date_start.isoformat() if self.date_start else None,
-                    "end": self.date_end.isoformat() if self.date_end else None
-                },
-                "scope": "country"
-            }
+            logger.exception(f"Error getting complete statistics: {e}")
+            raise
 
 
 class SpecificPolicyStatisticsService:
@@ -2312,8 +2162,8 @@ class SpecificPolicyStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_claims_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_claims_evolution: {e}")
+            raise
     
     def get_reimbursed_amount_evolution(self):
         """
@@ -2337,8 +2187,8 @@ class SpecificPolicyStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_reimbursed_amount_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_reimbursed_amount_evolution: {e}")
+            raise
     
     def get_claimed_amount_evolution(self):
         """
@@ -2362,8 +2212,8 @@ class SpecificPolicyStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_claimed_amount_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_claimed_amount_evolution: {e}")
+            raise
     
     def get_insured_count_evolution(self):
         """
@@ -2387,8 +2237,8 @@ class SpecificPolicyStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_insured_count_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_insured_count_evolution: {e}")
+            raise
     
     def get_partner_consumption_series(self):
         """
@@ -2429,8 +2279,8 @@ class SpecificPolicyStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_partner_consumption_series: {e}")
-            return []
+            logger.exception(f"Error in get_partner_consumption_series: {e}")
+            raise
     
     def get_act_family_consumption_series(self):
         """
@@ -2472,8 +2322,8 @@ class SpecificPolicyStatisticsService:
             
             return result
         except Exception as e:
-            logger.error(f"Error in get_act_family_consumption_series: {e}")
-            return []
+            logger.exception(f"Error in get_act_family_consumption_series: {e}")
+            raise
     
     def get_complete_statistics(self):
         """
@@ -2543,7 +2393,7 @@ class SpecificPolicyStatisticsService:
                 }
             }
         except Exception as e:
-            logger.error(f"Error getting complete statistics: {e}")
-            return {}
+            logger.exception(f"Error getting complete statistics: {e}")
+            raise
 
 

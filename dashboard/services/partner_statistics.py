@@ -100,8 +100,8 @@ class GlobalPartnerStatisticsService:
             
             return partners_evolution
         except Exception as e:
-            logger.error(f"Error in get_partners_with_consumption_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_partners_with_consumption_evolution: {e}")
+            raise
 
     def get_total_claimed_evolution(self):
         """
@@ -130,8 +130,8 @@ class GlobalPartnerStatisticsService:
             
             return claimed_evolution
         except Exception as e:
-            logger.error(f"Error in get_total_claimed_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_total_claimed_evolution: {e}")
+            raise
 
     def get_total_reimbursed_evolution(self):
         """
@@ -160,8 +160,8 @@ class GlobalPartnerStatisticsService:
             
             return reimbursed_evolution
         except Exception as e:
-            logger.error(f"Error in get_total_reimbursed_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_total_reimbursed_evolution: {e}")
+            raise
 
     def get_top_partners_table(self, limit=5):
         """
@@ -200,8 +200,8 @@ class GlobalPartnerStatisticsService:
             
             return partners_table
         except Exception as e:
-            logger.error(f"Error in get_top_partners_table: {e}")
-            return []
+            logger.exception(f"Error in get_top_partners_table: {e}")
+            raise
 
     def get_top_partners_consumption_series(self, limit=10):
         """
@@ -259,8 +259,8 @@ class GlobalPartnerStatisticsService:
             
             return series_data, labels
         except Exception as e:
-            logger.error(f"Error in get_top_partners_consumption_series: {e}")
-            return [], []
+            logger.exception(f"Error in get_top_partners_consumption_series: {e}")
+            raise
 
     def get_total_statistics(self):
         """
@@ -287,14 +287,8 @@ class GlobalPartnerStatisticsService:
                 'total_partners': len(self.partner_ids)
             }
         except Exception as e:
-            logger.error(f"Error in get_total_statistics: {e}")
-            return {
-                'total_claimed': 0,
-                'total_reimbursed': 0,
-                'total_claims': 0,
-                'unique_partners_with_consumption': 0,
-                'total_partners': 0
-            }
+            logger.exception(f"Error in get_total_statistics: {e}")
+            raise
     
     def _compute_evolution_rate_from_series(self, series):
         """
@@ -324,8 +318,8 @@ class GlobalPartnerStatisticsService:
             
             return round(100 * (last_value - first_value) / abs(first_value), 2)
         except Exception as e:
-            logger.error(f"Error computing evolution rate: {e}")
-            return 0.0
+            logger.exception(f"Error computing evolution rate: {e}")
+            raise
 
     def get_complete_statistics(self):
         """
@@ -388,8 +382,8 @@ class GlobalPartnerStatisticsService:
             }
             
         except Exception as e:
-            logger.error(f"Error generating complete partner statistics: {e}")
-            return {}
+            logger.exception(f"Error generating complete partner statistics: {e}")
+            raise
 
 
 class GlobalPartnerListStatisticsService:
@@ -489,8 +483,8 @@ class GlobalPartnerListStatisticsService:
             return partners_list
             
         except Exception as e:
-            logger.error(f"Error in get_partners_list: {e}")
-            return []
+            logger.exception(f"Error in get_partners_list: {e}")
+            raise
     
     def get_partners_statistics_summary(self):
         """
@@ -524,17 +518,8 @@ class GlobalPartnerListStatisticsService:
             }
             
         except Exception as e:
-            logger.error(f"Error in get_partners_statistics_summary: {e}")
-            return {
-                'total_partners': 0,
-                'partners_with_consumption': 0,
-                'partners_without_consumption': 0,
-                'total_claimed': 0.0,
-                'total_reimbursed': 0.0,
-                'total_claims': 0,
-                'date_start': self.date_start.isoformat() if hasattr(self, 'date_start') else None,
-                'date_end': self.date_end.isoformat() if hasattr(self, 'date_end') else None
-            }
+            logger.exception(f"Error in get_partners_statistics_summary: {e}")
+            raise
     
     def get_complete_partners_list(self):
         """
@@ -553,11 +538,8 @@ class GlobalPartnerListStatisticsService:
             }
             
         except Exception as e:
-            logger.error(f"Error generating complete partners list: {e}")
-            return {
-                'partners_list': [],
-                'summary': {}
-            }
+            logger.exception(f"Error generating complete partners list: {e}")
+            raise
 
 
 class CountryPartnerStatisticsService(GlobalPartnerStatisticsService):
@@ -625,8 +607,8 @@ class CountryPartnerStatisticsService(GlobalPartnerStatisticsService):
             return stats
             
         except Exception as e:
-            logger.error(f"Error generating country partner statistics: {e}")
-            return {}
+            logger.exception(f"Error generating country partner statistics: {e}")
+            raise
 
 
 
@@ -700,11 +682,8 @@ class CountryPartnerListStatisticsService(GlobalPartnerListStatisticsService):
             }
             
         except Exception as e:
-            logger.error(f"Error generating complete country partners list: {e}")
-            return {
-                'partners_list': [],
-                'summary': {}
-            }
+            logger.exception(f"Error generating complete country partners list: {e}")
+            raise
 
 
 class ClientPartnerStatisticsService(GlobalPartnerStatisticsService):
@@ -782,8 +761,8 @@ class ClientPartnerStatisticsService(GlobalPartnerStatisticsService):
             return stats
             
         except Exception as e:
-            logger.error(f"Error generating client partner statistics: {e}")
-            return {}
+            logger.exception(f"Error generating client partner statistics: {e}")
+            raise
 
 
 
@@ -869,11 +848,8 @@ class ClientPartnerListStatisticsService(GlobalPartnerListStatisticsService):
             }
             
         except Exception as e:
-            logger.error(f"Error generating complete client partners list: {e}")
-            return {
-                'partners_list': [],
-                'summary': {}
-            }
+            logger.exception(f"Error generating complete client partners list: {e}")
+            raise
 
 
 class PolicyPartnerStatisticsService(GlobalPartnerStatisticsService):
@@ -941,8 +917,8 @@ class PolicyPartnerStatisticsService(GlobalPartnerStatisticsService):
             return stats
             
         except Exception as e:
-            logger.error(f"Error generating policy partner statistics: {e}")
-            return {}
+            logger.exception(f"Error generating policy partner statistics: {e}")
+            raise
 
 
 class PolicyPartnerListStatisticsService(GlobalPartnerListStatisticsService):
@@ -1015,11 +991,8 @@ class PolicyPartnerListStatisticsService(GlobalPartnerListStatisticsService):
             }
             
         except Exception as e:
-            logger.error(f"Error generating complete policy partners list: {e}")
-            return {
-                'partners_list': [],
-                'summary': {}
-            }
+            logger.exception(f"Error generating complete policy partners list: {e}")
+            raise
 
 
 
@@ -1079,8 +1052,8 @@ class PartnerStatisticsService:
                 point['value'] = int(point['value'] or 0)
             return result
         except Exception as e:
-            logger.error(f"Error in get_clients_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_clients_evolution: {e}")
+            raise
 
     def get_consuming_insured_evolution(self):
         """
@@ -1097,8 +1070,8 @@ class PartnerStatisticsService:
                 point['value'] = int(point['value'] or 0)
             return result
         except Exception as e:
-            logger.error(f"Error in get_consuming_insured_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_consuming_insured_evolution: {e}")
+            raise
 
     def get_reimbursed_amount_evolution(self):
         """
@@ -1115,8 +1088,8 @@ class PartnerStatisticsService:
                 point['value'] = float(point['value'] or 0)
             return result
         except Exception as e:
-            logger.error(f"Error in get_reimbursed_amount_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_reimbursed_amount_evolution: {e}")
+            raise
 
     def get_claimed_amount_evolution(self):
         """
@@ -1133,8 +1106,8 @@ class PartnerStatisticsService:
                 point['value'] = float(point['value'] or 0)
             return result
         except Exception as e:
-            logger.error(f"Error in get_claimed_amount_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_claimed_amount_evolution: {e}")
+            raise
 
     def get_consumption_by_role_timeseries(self):
         """
@@ -1157,8 +1130,8 @@ class PartnerStatisticsService:
                 consumption_by_role[role] = result
             return consumption_by_role
         except Exception as e:
-            logger.error(f"Error in get_consumption_by_role_timeseries: {e}")
-            return {}
+            logger.exception(f"Error in get_consumption_by_role_timeseries: {e}")
+            raise
 
     def get_top_clients_consumption_series(self, limit=10):
         """
@@ -1196,8 +1169,8 @@ class PartnerStatisticsService:
             series_multi, categories = format_top_clients_series(top_clients_series, periods, self.granularity)
             return series_multi, categories
         except Exception as e:
-            logger.error(f"Error in get_top_clients_consumption_series: {e}")
-            return [], []
+            logger.exception(f"Error in get_top_clients_consumption_series: {e}")
+            raise
 
     def get_acts_count_evolution(self):
         """
@@ -1214,8 +1187,8 @@ class PartnerStatisticsService:
                 point['value'] = int(point['value'] or 0)
             return result
         except Exception as e:
-            logger.error(f"Error in get_acts_count_evolution: {e}")
-            return []
+            logger.exception(f"Error in get_acts_count_evolution: {e}")
+            raise
 
     def _calculate_actual_values(self, clients_series, insured_series, reimbursed_series, claimed_series, acts_series):
         def safe_last(series):
@@ -1303,7 +1276,7 @@ class PartnerStatisticsService:
                 'date_end': self.date_end.isoformat(),
             })
         except Exception as e:
-            logger.error(f"Error in get_complete_statistics: {e}")
-            return {}
+            logger.exception(f"Error in get_complete_statistics: {e}")
+            raise
 
 
